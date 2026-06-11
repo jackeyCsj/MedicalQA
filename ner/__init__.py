@@ -6,6 +6,7 @@
 * :class:`rule_find` —— Aho-Corasick 规则匹配器
 * :class:`tfidf_alignment` —— TF-IDF 实体对齐
 * :func:`get_ner_result` —— 推理入口（融合模型 + 规则 + 对齐）
+* :func:`get_ner_result_with_fallback` —— 主路径为空后的实体兜底召回
 * :func:`find_entities` / :func:`merge` —— 推理辅助
 * :class:`Nerdataset` / :class:`Entity_Extend` —— 训练数据集与增强
 * :func:`get_data` / :func:`build_tag2idx` —— 训练数据加载
@@ -27,10 +28,12 @@ from .dataset import (
 )
 from .model import Bert_Model
 from .inference import (
+    build_sliding_window_queries,
     rule_find,
     tfidf_alignment,
     merge,
     get_ner_result,
+    get_ner_result_with_fallback,
 )
 
 __all__ = [
@@ -43,5 +46,7 @@ __all__ = [
     "rule_find",
     "tfidf_alignment",
     "merge",
+    "build_sliding_window_queries",
     "get_ner_result",
+    "get_ner_result_with_fallback",
 ]

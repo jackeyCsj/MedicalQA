@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Dict, List, Optional, Tuple
 
 from kg_client import KGClient, build_attribute_prompt, build_relation_prompt
@@ -87,8 +88,9 @@ def route_intents(response: str) -> List[IntentSpec]:
             keyword_to_spec.append((kw, spec))
     keyword_to_spec.sort(key=lambda x: len(x[0]), reverse=True)
 
-    # 用一个 mutable 副本，命中后把该关键字从 response 中划掉，避免被更短的同 spec 关键字重复匹配
-    remaining = response
+    # 只解析 LLM 输出的意图列表，避免 "# ..." 解释里的"未选病因/预防"等词误触发。
+    list_match = re.search(r"\[[\s\S]*?\]", response or "")
+    remaining = list_match.group(0) if list_match else (response or "").split("#", 1)[0]
     for kw, spec in keyword_to_spec:
         if spec.intent_name in seen:
             continue

@@ -11,10 +11,11 @@ import sys
 logger = logging.getLogger(__name__)
 class Build_Ner_data():
     """
-        这是一个ner数据生成类。主要作用是将data文件夹下的medical.json文件中的文本打上标签。
-        这里有四类标签["食物","药品商","治疗方法","药品"]，每种标签所对应的实体在data文件夹下的f'{type}.txt'中
-        这里将每种实体导入到ahocorasick中，对每个文本进行模式匹配。
-        """
+    这是一个ner数据生成类。主要作用是将data文件夹下的medical.json文件中的文本打上标签。
+    这里有八类标签["疾病","疾病症状","检查项目","科目","食物","药品商","治疗方法","药品"]，
+    每种标签所对应的实体在data/ent_aug文件夹下的f'{type}.txt'中。
+    这里将每种实体导入到ahocorasick中，对每个文本进行模式匹配。
+    """
     def __init__(self):
         self.idx2type=idx2type = ["疾病","疾病症状","检查项目","科目","食物","药品商","治疗方法","药品"]
         self.type2idx=type2idx = {"疾病":0,"疾病症状":1,"检查项目":2,"科目":3,"食物":4,"药品商":5,"治疗方法":6,"药品":7}
@@ -30,6 +31,7 @@ class Build_Ner_data():
                     self.ahos[type2idx[type]].add_word(en,en)
         for i in range(len(self.ahos)):
             self.ahos[i].make_automaton()
+
     def split_text(self,text):
         """
         将长文本随机分割为短文本

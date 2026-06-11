@@ -15,13 +15,13 @@
 
 <br>
 
-**知识图谱精确检索** · **BERT NER 实体识别** · **LLM 意图分析** · **流式答案生成**
+**知识图谱精确检索** · **实体兜底召回** · **LLM 意图分析** · **流式答案生成**
 
 <br>
 
-<img src="img/overall.png" width="88%" />
+<img src="img/overall.png" width="100%" />
 
-<sub>系统流水线：用户提问 → NER 实体抽取 → LLM 意图识别 → 知识图谱 Cypher 检索 → LLM 答案生成</sub>
+<sub>系统流水线：用户提问 → 并行实体检索 / LLM 意图识别 → 知识图谱 Cypher 检索 → LLM 答案生成</sub>
 
 <br>
 
@@ -58,8 +58,8 @@
 **🔬 知识图谱 RAG**  
 Neo4j 图数据库精确检索，44,656 实体 + 312,159 关系
 
-**🧠 BERT + RNN 实体识别**  
-3 种数据增强策略，F1 = 97.40%
+**🧠 实体识别与兜底召回**
+BERT+RNN / Aho-Corasick / TF-IDF，空结果时启用短语召回和 LLM 查询扩展
 
 **💬 LLM 意图识别**  
 零标注成本，prompt + CoT + few-shot
@@ -353,6 +353,7 @@ ollama run qwen:32b "你好，请用一句话介绍自己"
 
 **ollama 在系统中的角色**：
 - **意图识别**：`webui.py` 中的 `Intent_Recognition()` 函数调用 `ollama.generate()` 让 LLM 分析用户问题属于 16 类意图中的哪几类
+- **实体兜底扩展**：主路径实体识别为空时，LLM 只生成最多 5 个 KG 查询词，不直接诊断或回答
 - **答案生成**：`main()` 函数调用 `ollama.chat(..., stream=True)` 让 LLM 根据知识图谱检索结果流式生成回答
 
 ---
@@ -427,7 +428,7 @@ RAGQnASystem/
 | 模块 | 职责 | 关键依赖 |
 |---|---|---|
 | `login.py` | 登录/注册入口，验证通过后调用 `webui.main()` | streamlit, user_data_storage |
-| `webui.py` | 对话流程编排：加载模型 → 接收输入 → 意图识别 → 图谱查询 → 流式回答 | 全部 |
+| `webui.py` | 对话流程编排：加载模型 → 接收输入 → 并行实体检索/意图识别 → 图谱查询 → 流式回答 | 全部 |
 | `intent_router.py` | 表驱动解析 LLM 意图输出，调用 `kg_client` 执行查询 | kg_client |
 | `kg_client.py` | Cypher 查询封装，统一空结果/异常处理 | py2neo |
 | `ner/` | NER 模型定义、训练、推理 | torch, transformers |
@@ -504,8 +505,20 @@ RAGQnASystem/
 **推理流程**（`ner/inference.py`）：
 1. BERT 模型预测 BIO 序列 → 提取实体名
 2. 规则查找（`rule_find`）：从 `data/ent_aug/*.txt` 加载全部已知实体
-3. TF-IDF 对齐（`tfidf_alignment`）：将模型预测的实体名与知识图谱中的标准实体名做最近邻匹配
-4. 合并（`merge`）：综合模型预测 + 规则匹配结果，输出最终实体字典 `{实体类型: 实体名}`
+3. 合并（`merge`）：综合模型预测 + 规则匹配结果，去除重叠实体
+4. TF-IDF 对齐（`tfidf_alignment`）：将候选实体与知识图谱中的标准实体名做最近邻匹配
+5. 若主路径返回空 `{}`，再触发 fallback：滑动窗口短语召回 + LLM 多查询扩展，合并后继续走 TF-IDF 对齐
+
+fallback 只在主路径没有识别到实体时启动。例如：
+- `我脚崴了` 可由 LLM 扩展为 `踝关节扭伤`、`踝扭伤`、`足踝捩伤` 等查询词
+- `我眼皮红肿怎么办` 可由短语召回和 LLM 扩展尝试匹配 `眼睛红肿`、`眼睑肿胀`、`眼睑浮肿`
+
+可用调试脚本观察链路：
+
+```bash
+python debug_pipeline.py "我脚崴了，有什么缓解办法吗"
+python debug_pipeline.py "我眼皮红肿怎么办"
+```
 
 ---
 
@@ -540,10 +553,11 @@ RAGQnASystem/
 **工作原理**：
 
 1. `webui.py` 的 `Intent_Recognition()` 函数将用户问题嵌入一个精心设计的 prompt 中
-2. prompt 包含 16 类意图定义 + 10 个 few-shot 示例（含思维链解释）
-3. LLM 输出形如 `["查询疾病简介", "查询疾病病因"]  # 因为...` 的 JSON 列表 + 注释
-4. `intent_router.py` 的 `route_intents()` 解析 LLM 输出，按关键字长度降序匹配避免子串冲突
-5. `execute_intents()` 对每个命中意图调用 `kg_client` 执行对应 Cypher 查询
+2. `webui.py` 使用异步编排，让意图识别与实体检索并行执行
+3. prompt 包含 16 类意图定义 + 10 个 few-shot 示例（含思维链解释）
+4. LLM 输出形如 `["查询疾病简介", "查询疾病病因"]  # 因为...` 的 JSON 列表 + 注释
+5. `intent_router.py` 的 `route_intents()` 只解析输出列表部分，并按关键字长度降序匹配避免子串冲突
+6. `execute_intents()` 对每个命中意图调用 `kg_client` 执行对应 Cypher 查询
 
 **意图路由如何避免误匹配**：
 
@@ -647,7 +661,8 @@ LLM 被严格约束为**只能基于 `<提示>` 中的知识图谱信息回答**
 - 登录/注册（管理员身份可查看调试信息）
 - 多窗口对话（侧边栏切换）
 - LLM 选择（Qwen 1.5 / Llama2-Chinese）
-- 管理员面板：显示实体识别结果、意图识别结果、KG 查询的原始提示信息
+- 页面状态提示：显示并行识别、兜底查询扩展、知识图谱查询、答案生成等阶段
+- 管理员面板：显示实体识别结果、fallback 是否触发、意图识别结果、KG 查询的原始提示信息
 - 一键跳转 Neo4j 浏览器修改知识图谱
 
 ---

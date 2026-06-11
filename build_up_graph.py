@@ -32,7 +32,6 @@ def import_disease_data(client,type,entity):
                            治疗周期=disease["治疗周期"],
                            治愈概率=disease["治愈概率"],
                            疾病易感人群=disease["疾病易感人群"],
-
                            )
         client.create(node)
 

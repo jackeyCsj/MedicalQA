@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import streamlit as st
 import ner_model as ner
@@ -9,7 +11,7 @@ import py2neo
 import random
 import re
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from config import settings
 from logging_setup import setup_logging
@@ -117,7 +119,10 @@ def Intent_Recognition(query: str, model: str = "") -> str:
     """
     prompt = f"""
 阅读下列提示，回答问题（问题在输入的最后）:
-当你试图识别用户问题中的查询意图时，你需要仔细分析问题，并在16个预定义的查询类别中一一进行判断。对于每一个类别，思考用户的问题是否含有与该类别对应的意图。如果判断用户的问题符合某个特定类别，就将该类别加入到输出列表中。这样的方法要求你对每一个可能的查询意图进行系统性的考虑和评估，确保没有遗漏任何一个可能的分类。
+当你试图识别用户问题中的查询意图时，你需要仔细分析问题，并在16个预定义的查询类别中一一进行判断。
+对于每一个类别，思考用户的问题是否含有与该类别对应的意图。
+如果判断用户的问题符合某个特定类别，就将该类别加入到输出列表中。
+这样的方法要求你对每一个可能的查询意图进行系统性的考虑和评估，确保没有遗漏任何一个可能的分类。
 
 **查询类别**
 - "查询疾病简介"
@@ -173,10 +178,11 @@ def Intent_Recognition(query: str, model: str = "") -> str:
 **示例10：**
 输入："葡萄糖浆的生产者是谁？葡萄糖浆是谁生产的？"
 输出：["查询药品的生产商"]  # 显然，用户想要问药品的生产商
+
 通过上述例子，我们希望你能够形成一套系统的思考过程，以准确识别出用户问题中的所有可能查询意图。请仔细分析用户的问题，考虑到其可能的多重含义，确保输出反映了所有相关的查询意图。
 
 **注意：**
-- 你的所有输出，都必须在这个范围内上述**查询类别**范围内，不可创造新的名词与类别！
+- 你的所有输出，都必须在上述**查询类别**范围内，不可创造新的名词与类别！
 - 参考上述5个示例：在输出查询意图对应的列表之后，请紧跟着用"#"号开始的注释，简短地解释为什么选择这些意图选项。注释应当直接跟在列表后面，形成一条连续的输出。
 - 你的输出的类别数量不应该超过5，如果确实有很多个，请你输出最有可能的5个！同时，你的解释不宜过长，但是得富有条理性。
 
@@ -188,6 +194,167 @@ def Intent_Recognition(query: str, model: str = "") -> str:
     rec_result = llm_generate(prompt, model=model)
     logger.debug('意图识别结果: %s', rec_result)
     return rec_result
+
+
+def _parse_query_expansion(raw_text: str) -> List[str]:
+    """解析 LLM 输出的 JSON 数组，失败时返回空列表。"""
+    match = re.search(r"\[[\s\S]*?\]", raw_text or "")
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        logger.warning("实体查询扩展 JSON 解析失败: %s", raw_text)
+        return []
+    if not isinstance(data, list):
+        return []
+
+    queries: List[str] = []
+    seen: set[str] = set()
+    for item in data:
+        text = re.sub(r"[\s,，。;；、]+", "", str(item).strip())
+        if not 2 <= len(text) <= 20 or text in seen:
+            continue
+        seen.add(text)
+        queries.append(text)
+        if len(queries) >= 5:
+            break
+    return queries
+
+
+def expand_entity_queries(query: str, model: str = "") -> List[str]:
+    """用 LLM 将口语化表达改写为 KG 实体查询词；只在实体主路径为空时调用。"""
+    prompt = f"""
+你是医疗知识图谱的实体查询改写器。
+你的任务是把用户的口语化医疗表达改写成可能用于检索知识图谱的标准实体查询词。
+要求：
+1. 只输出 JSON 数组，不要解释。
+2. 最多输出 5 个查询词。
+3. 查询词可以是疾病、症状、检查项目或药品。
+4. 不要诊断用户，不要给治疗建议。
+
+示例：
+用户：我脚崴了
+输出：["踝关节扭伤", "踝扭伤", "足踝捩伤"]
+
+用户：我眼皮红肿怎么办
+输出：["眼睛红肿", "眼睑肿胀", "眼睑浮肿"]
+
+用户：{query}
+输出：
+"""
+    try:
+        return _parse_query_expansion(llm_generate(prompt, model=model))
+    except Exception:
+        logger.exception("LLM 实体查询扩展失败")
+        return []
+
+
+async def get_entities_async(
+    query: str,
+    selected_model: str,
+    bert_model,
+    bert_tokenizer,
+    rule,
+    tfidf_r,
+    device,
+    idx2tag,
+    status_placeholder=None,
+) -> Tuple[Dict[str, str], Dict[str, object]]:
+    """异步实体检索：先跑主路径，主路径为空时再触发兜底扩展。"""
+    base_entities = await asyncio.to_thread(
+        ner.get_ner_result,
+        bert_model,
+        bert_tokenizer,
+        query,
+        rule,
+        tfidf_r,
+        device,
+        idx2tag,
+    )
+    if base_entities:
+        return base_entities, {
+            "used_fallback": False,
+            "fallback_queries": [],
+            "source": "base",
+        }
+
+    if status_placeholder is not None:
+        status_placeholder.info("基础实体识别未命中，正在进行兜底查询扩展...")
+
+    expanded_queries = await asyncio.to_thread(expand_entity_queries, query, selected_model)
+    return await asyncio.to_thread(
+        ner.get_ner_result_with_fallback,
+        bert_model,
+        bert_tokenizer,
+        query,
+        rule,
+        tfidf_r,
+        device,
+        idx2tag,
+        expanded_queries,
+        base_entities,
+    )
+
+
+async def analyze_query_async(
+    query: str,
+    selected_model: str,
+    bert_model,
+    bert_tokenizer,
+    rule,
+    tfidf_r,
+    device,
+    idx2tag,
+    status_placeholder=None,
+) -> Tuple[str, Dict[str, str], Dict[str, object]]:
+    """并行执行意图识别与实体检索。"""
+    intent_task = asyncio.create_task(
+        asyncio.to_thread(Intent_Recognition, query, selected_model)
+    )
+    entity_task = asyncio.create_task(
+        get_entities_async(
+            query,
+            selected_model,
+            bert_model,
+            bert_tokenizer,
+            rule,
+            tfidf_r,
+            device,
+            idx2tag,
+            status_placeholder,
+        )
+    )
+    intent_response, (entities, entity_meta) = await asyncio.gather(intent_task, entity_task)
+    return intent_response, entities, entity_meta
+
+
+def run_query_analysis(
+    query: str,
+    selected_model: str,
+    bert_model,
+    bert_tokenizer,
+    rule,
+    tfidf_r,
+    device,
+    idx2tag,
+    status_placeholder=None,
+) -> Tuple[str, Dict[str, str], Dict[str, object]]:
+    """在 Streamlit 同步主流程中运行异步分析任务。"""
+    return asyncio.run(
+        analyze_query_async(
+            query,
+            selected_model,
+            bert_model,
+            bert_tokenizer,
+            rule,
+            tfidf_r,
+            device,
+            idx2tag,
+            status_placeholder,
+        )
+    )
+
 
 
 def add_shuxing_prompt(entity, shuxing, client):
@@ -206,6 +373,7 @@ def add_lianxi_prompt(entity, lianxi, target, client):
     kg = client if isinstance(client, KGClient) else KGClient(client)
     items = kg.get_related_entities(entity, lianxi, target)
     return build_relation_prompt(entity, lianxi, items)
+
 def generate_prompt(
     response: str,
     query: str,
@@ -216,12 +384,16 @@ def generate_prompt(
     tfidf_r,
     device,
     idx2tag,
+    entities: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, str, Dict[str, str]]:
     """根据 LLM 意图识别输出与 NER 抽取结果，组装最终送给 LLM 的 prompt。
 
     :return: ``(prompt, intents_str, entities)``；``intents_str`` 是「、」拼接的中文意图名。
     """
-    entities = ner.get_ner_result(bert_model, bert_tokenizer, query, rule, tfidf_r, device, idx2tag)
+    if entities is None:
+        entities = ner.get_ner_result(bert_model, bert_tokenizer, query, rule, tfidf_r, device, idx2tag)
+    else:
+        entities = dict(entities)
     # 统一封装为 KGClient（若调用方已传入 KGClient 则直接复用）
     kg = client if isinstance(client, KGClient) else KGClient(client)
     yitu: List[str] = []
@@ -347,28 +519,53 @@ def main(is_admin: bool, usname: str) -> None:
         with st.chat_message("user"):
             st.markdown(query)
 
+        status_placeholder = st.empty()
         response_placeholder = st.empty()
-        response_placeholder.text("正在进行意图识别...")
 
         query = current_messages[-1]["content"]
-        response = Intent_Recognition(query, selected_model)
-        response_placeholder.empty()
+        status_placeholder.info("正在并行识别意图和抽取实体...")
+        response, entities, entity_meta = run_query_analysis(
+            query,
+            selected_model,
+            bert_model,
+            bert_tokenizer,
+            rule,
+            tfidf_r,
+            device,
+            idx2tag,
+            status_placeholder,
+        )
 
-        prompt, yitu, entities = generate_prompt(response, query, client, bert_model, bert_tokenizer, rule, tfidf_r, device, idx2tag)
+        status_placeholder.info("正在查询知识图谱...")
+        prompt, yitu, entities = generate_prompt(
+            response,
+            query,
+            client,
+            bert_model,
+            bert_tokenizer,
+            rule,
+            tfidf_r,
+            device,
+            idx2tag,
+            entities=entities,
+        )
 
+        status_placeholder.info("正在生成回答...")
         last = ""
         for chunk in llm_chat_stream([{'role': 'user', 'content': prompt}], model=selected_model):
             last += chunk
             response_placeholder.markdown(last)
         response_placeholder.markdown("")
+        status_placeholder.empty()
 
         knowledge = re.findall(r'<提示>(.*?)</提示>', prompt)
         zhishiku_content = "\n".join([f"提示{idx + 1}, {kn}" for idx, kn in enumerate(knowledge) if len(kn) >= 3])
+        ent_debug = {"entities": entities, "retrieval": entity_meta}
         with st.chat_message("assistant"):
             st.markdown(last)
             if show_ent:
                 with st.expander("实体识别结果"):
-                    st.write(str(entities))
+                    st.write(ent_debug)
             if show_int:
                 with st.expander("意图识别结果"):
                     st.write(yitu)
@@ -377,7 +574,19 @@ def main(is_admin: bool, usname: str) -> None:
                 
                 with st.expander("点击显示知识库信息"):
                     st.write(zhishiku_content)
-        current_messages.append({"role": "assistant", "content": last, "yitu": yitu, "prompt": zhishiku_content, "ent": str(entities)})
+        current_messages.append({
+            "role": "assistant",
+            "content": last,
+            "yitu": yitu,
+            "prompt": zhishiku_content,
+            "ent": str(ent_debug),
+        })
 
 
     st.session_state.messages[active_window_index] = current_messages
+
+
+
+
+if __name__ == "__main__":
+    pass
