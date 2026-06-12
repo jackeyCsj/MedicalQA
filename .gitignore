@@ -1,5 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Neo4j local install
 neo4j-community-5.18.1/
+
+# Large model files (download separately)
 model/chinese-roberta-wwm-ext/
 model/best_roberta_rnn_model_ent_aug.pt
-__pycache__/
+
+# Runtime / sensitive
+tmp_data/user_credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / tools
+.obsidian/
+.vscode/
+.idea/
+
+# Tests (if not ready to track)
 tests/
+
+# Node (frontend has its own .gitignore too)
+node_modules/

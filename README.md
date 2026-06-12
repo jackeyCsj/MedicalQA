@@ -360,6 +360,8 @@ ollama run qwen:32b "你好，请用一句话介绍自己"
 
 ### 步骤 6 · 启动应用
 
+旧版 Streamlit 入口仍然保留：
+
 ```bash
 streamlit run login.py
 ```
@@ -368,6 +370,30 @@ streamlit run login.py
 
 > [!WARNING]
 > 账号密码以明文存储在 `tmp_data/user_credentials.json` 中，**仅供本地 demo 使用**。详见「安全须知」。
+
+新版前后端分离入口使用 FastAPI + Vue3，需要先准备 PostgreSQL：
+
+```bash
+# 先在 PostgreSQL 中创建 medicalqa 数据库，例如：
+createdb medicalqa
+
+# PowerShell 示例 DATABASE_URL，请按你的 PostgreSQL 用户名、密码、数据库名修改
+$env:DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/medicalqa"
+$env:SESSION_SECRET="please-change-this-secret"
+
+# 后端
+python -m uvicorn backend.main:app --reload
+
+# 前端（PowerShell 下优先使用 npm.cmd，避免 npm.ps1 执行策略问题）
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+前端默认打开 http://localhost:5173 ，后端默认运行在 http://localhost:8000 。
+
+> [!TIP]
+> 新版登录采用 **PostgreSQL + 服务端 Session Cookie**：浏览器只保存随机 session，密码只存哈希；生产环境请把 `COOKIE_SECURE=True`，并替换 `SESSION_SECRET`。
 
 ---
 
@@ -397,6 +423,8 @@ streamlit run login.py
 RAGQnASystem/
 ├── login.py               # Streamlit 入口：登录/注册
 ├── webui.py               # 主 UI + 对话流程编排
+├── backend/               # FastAPI 后端：认证、会话、聊天 SSE API
+├── frontend/              # Vue3 + Vite 前端：登录、聊天、管理员调试面板
 ├── config.py              # 集中配置（环境变量覆盖）
 ├── logging_setup.py       # 统一日志初始化
 ├── kg_client.py           # Neo4j 知识图谱查询封装
@@ -685,6 +713,12 @@ LLM 被严格约束为**只能基于 `<提示>` 中的知识图谱信息回答**
 | `TMP_DIR` | `tmp_data` | 缓存目录 |
 | `MODEL_DIR` | `model` | 模型权重目录 |
 | `LOG_LEVEL` | `INFO` | 日志级别（DEBUG/INFO/WARNING/ERROR） |
+| `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/medicalqa` | FastAPI 账号/会话库 |
+| `SESSION_SECRET` | `dev-insecure-change-me` | Session hash 使用的服务端密钥，部署时必须修改 |
+| `SESSION_COOKIE_NAME` | `session` | 浏览器 Cookie 名称 |
+| `SESSION_EXPIRE_DAYS` | `7` | 登录会话有效期 |
+| `COOKIE_SECURE` | `False` | 生产 HTTPS 环境建议设为 `True` |
+| `CORS_ORIGINS` | `http://localhost:5173` | 允许携带 Cookie 访问 API 的前端源 |
 
 > [!TIP]
 > **推荐做法**：在项目根目录创建 `.env` 文件（已加入 `.gitignore`），然后启动前执行：

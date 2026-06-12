@@ -5,6 +5,8 @@
     python debug_pipeline.py "我睡觉起来左眼皮肿了，并且还有些疼痛是怎么回事" --probe 眼皮肿
 
     python debug_pipeline.py "我脚崴了，有什么缓解办法吗" --no-llm
+
+    python debug_pipeline.py "我牙齿上长黑斑怎么回事"
 """
 
 from __future__ import annotations

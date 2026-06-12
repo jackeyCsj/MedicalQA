@@ -23,3 +23,9 @@ torch>=2.2,<2.4
 peft==0.10.0
 # dev：单元测试使用，可选
 pytest>=7.0
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+SQLAlchemy>=2.0,<3
+psycopg[binary]>=3.2,<4
+alembic>=1.13,<2
+argon2-cffi>=23.1,<24

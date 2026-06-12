@@ -23,6 +23,25 @@ def _env(name: str, default: str) -> str:
     return value if value is not None and value != "" else default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """读取布尔环境变量。"""
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    """读取整数环境变量，非法时返回 default。"""
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     """运行时配置容器（不可变）。"""
@@ -54,6 +73,14 @@ class Settings:
     # --- 日志 ---
     LOG_LEVEL: str
 
+    # --- FastAPI / Auth ---
+    DATABASE_URL: str
+    SESSION_SECRET: str
+    SESSION_COOKIE_NAME: str
+    SESSION_EXPIRE_DAYS: int
+    COOKIE_SECURE: bool
+    CORS_ORIGINS: str
+
 
 def _build_settings() -> Settings:
     return Settings(
@@ -74,6 +101,15 @@ def _build_settings() -> Settings:
         TMP_DIR=_env("TMP_DIR", "tmp_data"),
         MODEL_DIR=_env("MODEL_DIR", "model"),
         LOG_LEVEL=_env("LOG_LEVEL", "INFO"),
+        DATABASE_URL=_env(
+            "DATABASE_URL",
+            "postgresql+psycopg://postgres:postgres@localhost:5432/medicalqa",
+        ),
+        SESSION_SECRET=_env("SESSION_SECRET", "dev-insecure-change-me"),
+        SESSION_COOKIE_NAME=_env("SESSION_COOKIE_NAME", "session"),
+        SESSION_EXPIRE_DAYS=_env_int("SESSION_EXPIRE_DAYS", 7),
+        COOKIE_SECURE=_env_bool("COOKIE_SECURE", False),
+        CORS_ORIGINS=_env("CORS_ORIGINS", "http://localhost:5173"),
     )
 
 
