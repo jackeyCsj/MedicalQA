@@ -15,6 +15,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 自动加载项目根目录下的 .env 文件（不覆盖已有环境变量）
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 def _env(name: str, default: str) -> str:

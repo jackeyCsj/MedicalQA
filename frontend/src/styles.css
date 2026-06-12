@@ -127,7 +127,7 @@ textarea {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: 1fr auto;
   min-width: 0;
 }
 
@@ -179,8 +179,15 @@ textarea {
 }
 
 .status {
-  margin: 0 28px 12px;
   color: #0f766e;
+  font-size: 14px;
+  padding: 0 4px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .composer {

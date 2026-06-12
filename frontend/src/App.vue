@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { login, logout, me, models, register, streamChat, type StreamEvent, type User } from './api'
 
 type Message = {
@@ -21,8 +21,19 @@ const input = ref('')
 const statusText = ref('')
 const sending = ref(false)
 const messages = ref<Message[]>([])
+const messagesRef = ref<HTMLElement | null>(null)
 
 const isAdmin = computed(() => user.value?.is_admin === true)
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesRef.value) {
+      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    }
+  })
+}
+
+watch(statusText, scrollToBottom)
 
 onMounted(async () => {
   try {
@@ -30,14 +41,21 @@ onMounted(async () => {
   } catch {
     user.value = null
   }
+  await loadModels()
+})
+
+async function loadModels() {
   try {
     const result = await models()
-    availableModels.value = result.models
-    selectedModel.value = result.models[0] ?? null
-  } catch {
+    availableModels.value = result.models ?? []
+    if (!selectedModel.value && availableModels.value.length) {
+      selectedModel.value = availableModels.value[0]
+    }
+  } catch (e) {
+    console.error('Failed to load models:', e)
     availableModels.value = []
   }
-})
+}
 
 async function submitAuth() {
   authBusy.value = true
@@ -84,6 +102,7 @@ async function sendMessage() {
         assistant.debug?.push(event.data)
       } else if (event.event === 'token') {
         assistant.content += event.data
+        scrollToBottom()
       } else if (event.event === 'error') {
         assistant.content += `\n${event.data.message}`
       } else if (event.event === 'done') {
@@ -136,6 +155,7 @@ async function sendMessage() {
         <label>
           模型
           <select v-model="selectedModel">
+            <option v-if="!availableModels.length" :value="null" disabled>加载中...</option>
             <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
           </select>
         </label>
@@ -143,7 +163,7 @@ async function sendMessage() {
       </aside>
 
       <section class="chat-panel">
-        <div class="messages">
+        <div class="messages" ref="messagesRef">
           <article v-for="(message, index) in messages" :key="index" :class="['message', message.role]">
             <div class="bubble">{{ message.content || '...' }}</div>
             <details v-if="isAdmin && message.debug?.length" class="debug">
@@ -151,8 +171,8 @@ async function sendMessage() {
               <pre>{{ JSON.stringify(message.debug, null, 2) }}</pre>
             </details>
           </article>
+          <div v-if="statusText" class="status">{{ statusText }}</div>
         </div>
-        <div v-if="statusText" class="status">{{ statusText }}</div>
         <form class="composer" @submit.prevent="sendMessage">
           <textarea v-model="input" rows="2" placeholder="描述你的问题，例如：我牙齿上长黑斑怎么回事" />
           <button class="primary" :disabled="sending">发送</button>

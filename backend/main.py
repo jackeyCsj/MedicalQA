@@ -27,3 +27,12 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(chat_router)
+
+
+"""
+  python -m uvicorn backend.main:app --reload    # 后端
+    http://127.0.0.1:8000
+  cd frontend && npm.cmd run dev                  # 前端
+    http://localhost:5173
+
+"""
