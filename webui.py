@@ -1,13 +1,7 @@
 import asyncio
 import json
-import os
-import streamlit as st
 import ner_model as ner
-import pickle
 import openai
-from transformers import BertTokenizer
-import torch
-import py2neo
 import random
 import re
 import logging
@@ -15,11 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 from config import settings
 from logging_setup import setup_logging
-from kg_client import (
-    KGClient,
-    build_attribute_prompt,
-    build_relation_prompt,
-)
+from kg_client import KGClient
 from intent_router import execute_intents
 
 setup_logging()
@@ -31,10 +21,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _get_openai_client() -> openai.OpenAI:
-    """返回 DashScope 的 OpenAI 兼容客户端。"""
+    """返回当前 LLM_PROVIDER 的 OpenAI 兼容客户端。"""
     return openai.OpenAI(
-        api_key=settings.DASHSCOPE_API_KEY,
-        base_url=settings.DASHSCOPE_BASE_URL,
+        api_key=settings.LLM_API_KEY,
+        base_url=settings.LLM_BASE_URL,
     )
 
 
@@ -44,16 +34,15 @@ def llm_generate(prompt: str, model: str = "") -> str:
     :param prompt: 提示词
     :param model: 模型名称，为空时使用配置默认值
     """
-    if settings.LLM_PROVIDER == "dashscope":
-        client = _get_openai_client()
-        resp = client.chat.completions.create(
-            model=model or settings.DASHSCOPE_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.choices[0].message.content
-    else:
+    if settings.LLM_PROVIDER == "ollama":
         import ollama
         return ollama.generate(model=model or settings.OLLAMA_QWEN_MODEL, prompt=prompt)['response']
+    client = _get_openai_client()
+    resp = client.chat.completions.create(
+        model=model or settings.LLM_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.choices[0].message.content
 
 
 def llm_chat_stream(messages: list, model: str = ""):
@@ -62,50 +51,20 @@ def llm_chat_stream(messages: list, model: str = ""):
     :param messages: 消息列表
     :param model: 模型名称，为空时使用配置默认值
     """
-    if settings.LLM_PROVIDER == "dashscope":
-        client = _get_openai_client()
-        stream = client.chat.completions.create(
-            model=model or settings.DASHSCOPE_MODEL,
-            messages=messages,
-            stream=True,
-        )
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    else:
+    if settings.LLM_PROVIDER == "ollama":
         import ollama
         for chunk in ollama.chat(model=model or settings.OLLAMA_QWEN_MODEL, messages=messages, stream=True):
             yield chunk['message']['content']
-
-
-
-@st.cache_resource
-def load_model(cache_model: str):
-    """加载 NER 推理所需的全部资源（被 streamlit 缓存）。
-
-    返回 ``(glm_tokenizer, glm_model, bert_tokenizer, bert_model, idx2tag, rule, tfidf_r, device)``，
-    其中 ``glm_*`` 已废弃返回 ``None``，仅为保持原签名不破坏调用方。
-    """
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    # ChatGLM 路径已废弃；保留 None 占位避免下游解包错误
-    glm_model = None
-    glm_tokenizer = None
-    # 加载 Bert 模型
-    with open(os.path.join(settings.TMP_DIR, 'tag2idx.npy'), 'rb') as f:
-        tag2idx = pickle.load(f)
-    idx2tag = list(tag2idx)
-    rule = ner.rule_find()
-    tfidf_r = ner.tfidf_alignment()
-    model_name = settings.NER_MODEL_NAME
-    bert_tokenizer = BertTokenizer.from_pretrained(model_name)
-    bert_model = ner.Bert_Model(model_name, hidden_size=128, tag_num=len(tag2idx), bi=True)
-    bert_model.load_state_dict(torch.load(
-        os.path.join(settings.MODEL_DIR, f'{cache_model}.pt'),
-        map_location=device,
-    ))
-    bert_model = bert_model.to(device)
-    bert_model.eval()
-    return glm_tokenizer, glm_model, bert_tokenizer, bert_model, idx2tag, rule, tfidf_r, device
+        return
+    client = _get_openai_client()
+    stream = client.chat.completions.create(
+        model=model or settings.LLM_MODEL,
+        messages=messages,
+        stream=True,
+    )
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
 
 
 
@@ -329,51 +288,6 @@ async def analyze_query_async(
     return intent_response, entities, entity_meta
 
 
-def run_query_analysis(
-    query: str,
-    selected_model: str,
-    bert_model,
-    bert_tokenizer,
-    rule,
-    tfidf_r,
-    device,
-    idx2tag,
-    status_placeholder=None,
-) -> Tuple[str, Dict[str, str], Dict[str, object]]:
-    """在 Streamlit 同步主流程中运行异步分析任务。"""
-    return asyncio.run(
-        analyze_query_async(
-            query,
-            selected_model,
-            bert_model,
-            bert_tokenizer,
-            rule,
-            tfidf_r,
-            device,
-            idx2tag,
-            status_placeholder,
-        )
-    )
-
-
-
-def add_shuxing_prompt(entity, shuxing, client):
-    """[转发] 查询疾病属性并生成 ``<提示>...</提示>`` 文本。
-
-    历史接口保留：第三个参数 ``client`` 既可以是 ``py2neo.Graph``，也可以是
-    :class:`kg_client.KGClient`。统一委托给 :class:`KGClient` 实现。
-    """
-    kg = client if isinstance(client, KGClient) else KGClient(client)
-    value = kg.get_disease_attribute(entity, shuxing)
-    return build_attribute_prompt(entity, shuxing, value)
-
-
-def add_lianxi_prompt(entity, lianxi, target, client):
-    """[转发] 查询疾病关系并生成 ``<提示>...</提示>`` 文本。"""
-    kg = client if isinstance(client, KGClient) else KGClient(client)
-    items = kg.get_related_entities(entity, lianxi, target)
-    return build_relation_prompt(entity, lianxi, items)
-
 def generate_prompt(
     response: str,
     query: str,
@@ -425,168 +339,3 @@ def generate_prompt(
     return prompt,"、".join(yitu),entities
 
 
-
-def ans_stream(prompt):
-    """[已弃用] 旧版 ChatGLM 流式回答接口。
-
-    项目当前使用 ollama 通过 ``ollama.chat(..., stream=True)`` 在 ``main()`` 内直接
-    流式输出，已不再依赖 ChatGLM；此函数仅作为历史占位保留为空实现，避免外部潜在引用
-    报错。如需恢复 ChatGLM 流式回答，请实现一个接受 (model, tokenizer, prompt) 的版本。
-    """
-    raise NotImplementedError(
-        "ans_stream 已弃用，请使用 main() 中的 ollama.chat 流式调用"
-    )
-
-
-
-def main(is_admin: bool, usname: str) -> None:
-    """Streamlit 主界面入口；由 ``login.py`` 在用户登录成功后调用。"""
-    cache_model = settings.NER_CHECKPOINT
-    st.title(f"医疗智能问答机器人")
-
-    with st.sidebar:
-        col1, col2 = st.columns([0.6, 0.6])
-        with col1:
-            st.image(os.path.join("img", "logo.jpg"), width="stretch")
-
-        st.caption(
-            f"""<p align="left">欢迎您，{'管理员' if is_admin else '用户'}{usname}！当前版本：{1.0}</p>""",
-            unsafe_allow_html=True,
-        )
-
-        if 'chat_windows' not in st.session_state:
-            st.session_state.chat_windows = [[]]
-            st.session_state.messages = [[]]
-
-        if st.button('新建对话窗口'):
-            st.session_state.chat_windows.append([])
-            st.session_state.messages.append([])
-
-        window_options = [f"对话窗口 {i + 1}" for i in range(len(st.session_state.chat_windows))]
-        selected_window = st.selectbox('请选择对话窗口:', window_options)
-        active_window_index = int(selected_window.split()[1]) - 1
-
-        if settings.LLM_PROVIDER == "dashscope":
-            available_models = [m.strip() for m in settings.DASHSCOPE_MODELS.split(",") if m.strip()]
-            selected_model = st.selectbox('请选择大语言模型:', available_models)
-        else:
-            selected_model = settings.OLLAMA_QWEN_MODEL
-            st.caption(f"🤖 模型：{selected_model}（本地 ollama）")
-
-        show_ent = show_int = show_prompt = False
-        if is_admin:
-            show_ent = st.sidebar.checkbox("显示实体识别结果")
-            show_int = st.sidebar.checkbox("显示意图识别结果")
-            show_prompt = st.sidebar.checkbox("显示查询的知识库信息")
-            if st.button('修改知识图谱'):
-            # 显示一个链接，用户可以点击这个链接在新标签页中打开百度
-                st.markdown('[点击这里修改知识图谱](http://127.0.0.1:7474/)', unsafe_allow_html=True)
-
-
-
-        if st.button("返回登录"):
-            st.session_state.logged_in = False
-            st.session_state.admin = False
-            st.rerun()
-
-    glm_tokenizer, glm_model, bert_tokenizer, bert_model, idx2tag, rule, tfidf_r, device = load_model(cache_model)
-    graph = py2neo.Graph(
-        settings.NEO4J_URL,
-        user=settings.NEO4J_USER,
-        password=settings.NEO4J_PASSWORD,
-        name=settings.NEO4J_DBNAME,
-    )
-    client = KGClient(graph)
-
-    current_messages = st.session_state.messages[active_window_index]
-
-    for message in current_messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            if message["role"] == "assistant":
-                if show_ent:
-                    with st.expander("实体识别结果"):
-                        st.write(message.get("ent", ""))
-                if show_int:
-                    with st.expander("意图识别结果"):
-                        st.write(message.get("yitu", ""))
-                if show_prompt:
-                    with st.expander("点击显示知识库信息"):
-                        st.write(message.get("prompt", ""))
-
-    if query := st.chat_input("Ask me anything!", key=f"chat_input_{active_window_index}"):
-        current_messages.append({"role": "user", "content": query})
-        with st.chat_message("user"):
-            st.markdown(query)
-
-        status_placeholder = st.empty()
-        response_placeholder = st.empty()
-
-        query = current_messages[-1]["content"]
-        status_placeholder.info("正在并行识别意图和抽取实体...")
-        response, entities, entity_meta = run_query_analysis(
-            query,
-            selected_model,
-            bert_model,
-            bert_tokenizer,
-            rule,
-            tfidf_r,
-            device,
-            idx2tag,
-            status_placeholder,
-        )
-
-        status_placeholder.info("正在查询知识图谱...")
-        prompt, yitu, entities = generate_prompt(
-            response,
-            query,
-            client,
-            bert_model,
-            bert_tokenizer,
-            rule,
-            tfidf_r,
-            device,
-            idx2tag,
-            entities=entities,
-        )
-
-        status_placeholder.info("正在生成回答...")
-        last = ""
-        for chunk in llm_chat_stream([{'role': 'user', 'content': prompt}], model=selected_model):
-            last += chunk
-            response_placeholder.markdown(last)
-        response_placeholder.markdown("")
-        status_placeholder.empty()
-
-        knowledge = re.findall(r'<提示>(.*?)</提示>', prompt)
-        zhishiku_content = "\n".join([f"提示{idx + 1}, {kn}" for idx, kn in enumerate(knowledge) if len(kn) >= 3])
-        ent_debug = {"entities": entities, "retrieval": entity_meta}
-        with st.chat_message("assistant"):
-            st.markdown(last)
-            if show_ent:
-                with st.expander("实体识别结果"):
-                    st.write(ent_debug)
-            if show_int:
-                with st.expander("意图识别结果"):
-                    st.write(yitu)
-            if show_prompt:
-                
-                
-                with st.expander("点击显示知识库信息"):
-                    st.write(zhishiku_content)
-        current_messages.append({
-            "role": "assistant",
-            "content": last,
-            "yitu": yitu,
-            "prompt": zhishiku_content,
-            "ent": str(ent_debug),
-        })
-
-
-    st.session_state.messages[active_window_index] = current_messages
-
-
-
-
-if __name__ == "__main__":
-    pass

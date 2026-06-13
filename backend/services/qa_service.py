@@ -99,9 +99,9 @@ class MedicalQAService:
         return self._kg
 
     def get_models(self) -> List[str]:
-        if settings.LLM_PROVIDER == "dashscope":
-            return [m.strip() for m in settings.DASHSCOPE_MODELS.split(",") if m.strip()]
-        return [settings.OLLAMA_QWEN_MODEL, settings.OLLAMA_LLAMA_MODEL]
+        if settings.LLM_PROVIDER == "ollama":
+            return [settings.OLLAMA_QWEN_MODEL, settings.OLLAMA_LLAMA_MODEL]
+        return [m.strip() for m in settings.LLM_MODELS.split(",") if m.strip()]
 
     async def analyze(self, message: str, model: str) -> tuple[str, Dict[str, str], Dict[str, object]]:
         self.load()

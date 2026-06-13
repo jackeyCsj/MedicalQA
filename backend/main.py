@@ -19,7 +19,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MedicalQA API", lifespan=lifespan)
 app.add_middleware(
-    CORSMiddleware,
+    # CORS 中间件 解决跨域问题——前端在 localhost:5173，后端在 localhost:8000，
+    # 浏览器默认会拦截跨域请求，加了这个就放行了。
+    CORSMiddleware, 
     allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],

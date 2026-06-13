@@ -58,14 +58,20 @@ class Settings:
     NEO4J_PASSWORD: str
     NEO4J_DBNAME: str
 
-    # --- LLM（支持 ollama 本地 / 阿里百炼 DashScope 云端） ---
-    LLM_PROVIDER: str           # "ollama" 或 "dashscope"
-    DASHSCOPE_API_KEY: str      # 百炼 API Key（环境变量 DASHSCOPE_API_KEY）
-    DASHSCOPE_MODEL: str        # 百炼模型 ID
-    DASHSCOPE_BASE_URL: str     # 百炼兼容接口地址
-    DASHSCOPE_MODELS: str       # 可选模型列表，逗号分隔
+    # --- LLM 通用配置（支持 dashscope / mimo / deepseek / ollama） ---
+    LLM_PROVIDER: str           # "dashscope" / "mimo" / "deepseek" / "ollama"
+    LLM_API_KEY: str            # 当前生效的 API Key
+    LLM_BASE_URL: str           # 当前生效的 OpenAI 兼容接口地址
+    LLM_MODEL: str              # 当前生效的默认模型
+    LLM_MODELS: str             # 可选模型列表，逗号分隔
 
-    # --- Ollama（向后保留，LLM_PROVIDER="ollama" 时使用） ---
+    # --- 旧版 DashScope 字段（向后保留，不再直接使用） ---
+    DASHSCOPE_API_KEY: str
+    DASHSCOPE_MODEL: str
+    DASHSCOPE_BASE_URL: str
+    DASHSCOPE_MODELS: str
+
+    # --- Ollama（LLM_PROVIDER="ollama" 时使用） ---
     OLLAMA_QWEN_MODEL: str
     OLLAMA_LLAMA_MODEL: str
 
@@ -88,13 +94,46 @@ class Settings:
     CORS_ORIGINS: str
 
 
+_LLM_PRESETS: dict[str, dict[str, str]] = {
+    "dashscope": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus-latest",
+        "models": "qwen3.7-plus,qwen3.7-max,deepseek-v4-flash,deepseek-v4-pro,kimi-k2.6,qwen3.6-flash",
+    },
+    "mimo": {
+        "base_url": "https://api.xiaomimimo.com/v1/chat/completions",
+        "model": "mimo-v2.5-pro",
+        "models": "mimo-v2.5-pro,mimo-v2.5",
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-pro",
+        "models": "deepseek-v4-flash,deepseek-v4-pro",
+    },
+}
+
+
 def _build_settings() -> Settings:
+    provider = _env("LLM_PROVIDER", "dashscope")
+    preset = _LLM_PRESETS.get(provider, {})
+    pfx = provider.upper()  # DASHSCOPE / MIMO / DEEPSEEK
+
+    # 优先级：LLM_* > 厂商专属环境变量（MIMO_API_KEY 等）> 预设默认值
+    llm_api_key = _env("LLM_API_KEY", _env(f"{pfx}_API_KEY", ""))
+    llm_base_url = _env("LLM_BASE_URL", _env(f"{pfx}_BASE_URL", preset.get("base_url", "")))
+    llm_model = _env("LLM_MODEL", _env(f"{pfx}_MODEL", preset.get("model", "")))
+    llm_models = _env("LLM_MODELS", _env(f"{pfx}_MODELS", preset.get("models", "")))
+
     return Settings(
         NEO4J_URL=_env("NEO4J_URL", "bolt://localhost:7687"),
         NEO4J_USER=_env("NEO4J_USER", "neo4j"),
         NEO4J_PASSWORD=_env("NEO4J_PASSWORD", "csj123456"),
         NEO4J_DBNAME=_env("NEO4J_DBNAME", "neo4j"),
-        LLM_PROVIDER=_env("LLM_PROVIDER", "dashscope"),
+        LLM_PROVIDER=provider,
+        LLM_API_KEY=llm_api_key,
+        LLM_BASE_URL=llm_base_url,
+        LLM_MODEL=llm_model,
+        LLM_MODELS=llm_models,
         DASHSCOPE_API_KEY=_env("DASHSCOPE_API_KEY", ""),
         DASHSCOPE_MODEL=_env("DASHSCOPE_MODEL", "qwen-plus-latest"),
         DASHSCOPE_BASE_URL=_env("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
