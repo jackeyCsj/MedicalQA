@@ -398,3 +398,30 @@ False
 
 
 
+
+
+
+
+# 6.13
+
+
+## 按照LightRAG的思想重构了MedicalQA
+
+
+
+**实施计划：**
+
+
+![[Pasted image 20260613224153.png|697]]
+
+
+![[Pasted image 20260613224218.png]]
+
+
+![[Pasted image 20260613224234.png]]
+
+
+
+
+
+

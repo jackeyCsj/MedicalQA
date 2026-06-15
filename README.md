@@ -757,15 +757,3 @@ export OLLAMA_QWEN_MODEL=qwen2.5:32b   # 或任何 ollama 支持的模型
 
 
 <div align="center">
-
-## 📮 联系方式
-
-如果您的复现遇到了困难，请随时联系！
-
-📧 **zeromakers@outlook.com**
-
-<br>
-
-如果本项目对你有帮助，欢迎点个 ⭐ Star！
-
-</div>

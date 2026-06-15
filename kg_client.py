@@ -6,14 +6,13 @@
 * 异常：通过 logger 记录但不中断 UI 流
 * 提示拼接：把 ``<提示>...</提示>`` 模板放在一处，便于后续维护
 
-设计原则：**查询方法只返回数据**，提示文本拼接由调用方（例如 ``intent_router``）完成，
-保持职责单一，便于单元测试。
+设计原则：**查询方法只返回数据**，提示文本拼接由调用方（例如 ``prompt_builder``）完成。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Sequence
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -90,25 +89,3 @@ class KGClient:
         rows = self._run_all(cypher)
         return [list(row.values())[0] for row in rows if row]
 
-
-# ---------------------------------------------------------------------- prompts
-
-_PROMPT_TEMPLATE = "<提示>用户对{entity}可能有查询{action}需求，知识库内容如下：{body}</提示>"
-_NO_INFO_TEXT = "图谱中无信息，查找失败。"
-
-
-def build_attribute_prompt(entity: str, attribute: str, value: Optional[str]) -> str:
-    """根据属性查询结果生成 ``<提示>...</提示>`` 文本。
-
-    :param entity: 实体名（疾病名）
-    :param attribute: 属性名（如 ``疾病简介``）
-    :param value: 查询结果，None 或空字符串表示无信息
-    """
-    body = value if value else _NO_INFO_TEXT
-    return _PROMPT_TEMPLATE.format(entity=entity, action=attribute, body=body)
-
-
-def build_relation_prompt(entity: str, relation: str, items: Sequence[str]) -> str:
-    """根据关系查询结果生成 ``<提示>...</提示>`` 文本。"""
-    body = "、".join(items) if items else _NO_INFO_TEXT
-    return _PROMPT_TEMPLATE.format(entity=entity, action=relation, body=body)
