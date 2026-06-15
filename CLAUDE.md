@@ -4,11 +4,12 @@
 
 ## 项目概述
 
-RAGQnASystem — 基于知识图谱 RAG + 大语言模型的医疗智能问答系统。
+RAGQnASystem — 基于 LightRAG 范式的医疗智能问答系统。
 
 - Neo4j 医疗知识图谱（4.4 万实体、31 万关系）做精确检索，缓解 LLM 幻觉
-- BERT+RNN NER（F1 97.40%）+ Aho-Corasick 规则匹配 + TF-IDF 对齐
-- 支持 DashScope（云端）和 Ollama（本地）两种 LLM 后端
+- LLM 关键词提取（替代 BERT NER）+ FAISS 向量语义检索 + 图谱一跳邻居扩展
+- 参考 LightRAG 双层检索范式：low-level（具体实体匹配）+ high-level（主题关系补充）
+- 支持多 LLM 提供商：DashScope、MiMo、DeepSeek、Ollama，通过 `LLM_PROVIDER` 切换
 - 前后端分离：FastAPI + Vue3 + PostgreSQL
 
 ## 常用命令
@@ -25,12 +26,11 @@ cd frontend && npm.cmd install && npm.cmd run dev   # Windows PowerShell 用 npm
 # --- 构建知识图谱（会询问是否删除 Neo4j 中已有数据）---
 python build_up_graph.py --website http://localhost:7474 --user neo4j --password <密码> --dbname neo4j
 
-# --- NER ---
-python ner_data.py              # 生成训练数据（需要先构建知识图谱）
-python -m ner.train             # 训练 NER 模型
+# --- 构建向量索引（首次使用前必须执行，约几分钟）---
+python build_vector_index.py
 
 # --- 调试流水线 ---
-python debug_pipeline.py "我脚崴了，有什么缓解办法吗"
+python debug_pipeline.py "我牙齿上长黑斑怎么回事"
 
 # --- 数据库迁移 ---
 alembic upgrade head            # 应用数据库迁移（backend/alembic/）
@@ -53,35 +53,48 @@ frontend/（Vue3+Vite+TS）──fetch/SSE──→ backend/（FastAPI）
                                             │
                     ┌───────────────────────┼───────────────────────┐
                     ▼                       ▼                       ▼
-              webui.py              intent_router.py          kg_client.py
-           （核心 QA 逻辑）          （表驱动意图路由）        （Neo4j Cypher 查询）
-                    │
-                    ▼
-              ner/（NER 子包）
-                    │
-                    ▼
-              config.py（集中配置）
+            keyword_extractor.py      retriever.py          prompt_builder.py
+           （LLM 关键词提取）       （双层检索器）         （Prompt 组装）
+                    │                       │
+                    ▼                       ▼
+              webui.py               vector_index.py
+           （LLM 调用层）           （FAISS 向量索引）
+                    │                       │
+                    ▼                       ▼
+              config.py               kg_client.py
+           （集中配置）            （Neo4j Cypher 查询）
 ```
 
-**数据流：**
+**数据流（LightRAG 范式）：**
 1. `qa_service.py:stream_answer()` 接收用户消息
-2. NER 实体抽取与 LLM 意图识别**并行执行**（`webui.py:analyze_query_async`，asyncio.gather）
-3. `intent_router.py:route_intents()` 按关键字长度降序匹配，避免子串冲突
-4. `kg_client.py:KGClient` 执行 Cypher 查询
-5. 主路径实体为空时触发 **fallback**：短语召回 + LLM 查询扩展（最多 5 个查询词）
-6. `webui.py:generate_prompt()` 拼装 `<指令>/<提示>/<用户问题>/<注意>` prompt
-7. LLM 流式生成回答，通过 SSE（`status`/`debug`/`token`/`done`/`error` 事件）推送到前端
+2. `keyword_extractor.extract_keywords()` — 1 次 LLM 调用，提取 local_keywords（具体实体）和 global_keywords（主题概念）
+3. `retriever.Retriever.retrieve()` — 双层检索：
+   - **Low-level**：local_keywords → FAISS 向量匹配 Top-K 实体 → Neo4j 查询属性和一跳邻居
+   - **High-level**：global_keywords → 对已匹配疾病实体补充目标关系（如"治疗方法"→ 治疗的方法）
+4. `prompt_builder.build_prompt()` — LightRAG 风格 prompt：`<指令>` + `<知识图谱信息>` + `<用户问题>` + `<注意>`
+5. LLM 流式生成回答，通过 SSE（`status`/`debug`/`token`/`done`/`error` 事件）推送到前端
 
 **关键设计决策：**
-- 表驱动意图路由（`INTENT_SPECS`）替代 16 个 if-else 块
-- NER 双重策略：BERT 模型预测 + Aho-Corasick 规则匹配，按实体长度优先级合并
-- TF-IDF 对齐将候选实体映射到知识图谱标准实体名（相似度 ≥ 0.5）
-- LLM 被严格约束为只能基于知识图谱 `<提示>` 内容回答，不可自由发挥
-- `qa_service.py` 不重写核心逻辑，直接从 `webui.py` 导入共享函数
+- LLM 关键词提取替代 BERT NER + 意图识别（1 次调用替代 2 次，成本更低，准确率更高）
+- FAISS 向量索引（text2vec-base-chinese，768 维）替代 TF-IDF 对齐 + Aho-Corasick 规则匹配
+- 双层检索参考 LightRAG：low-level 精确实体 + high-level 主题补充
+- LLM 被严格约束为只能基于 `<知识图谱信息>` 内容回答，不可自由发挥
+- `ner/` 目录保留训练代码，但运行时不再加载（已从 qa_service 中移除）
 
 ## 配置说明
 
-所有配置通过 `config.py` 的 `Settings` dataclass 管理，支持环境变量覆盖：
+所有配置通过 `config.py` 的 `Settings` dataclass 管理，支持环境变量覆盖。
+
+**LLM 提供商**：通过 `LLM_PROVIDER` 切换，内置预设表（`_LLM_PRESETS`）自动填充 base_url/model/models：
+
+| 提供商 | `LLM_PROVIDER` | API Key 环境变量 | 默认模型 |
+|--------|----------------|------------------|----------|
+| 阿里百炼 | `dashscope` | `DASHSCOPE_API_KEY` | `qwen-plus-latest` |
+| 小米 MiMo | `mimo` | `MIMO_API_KEY` | `mimo-v2.5-pro` |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` |
+| Ollama 本地 | `ollama` | 无需 | `qwen:32b` |
+
+**全部配置项：**
 
 | 变量名 | 默认值 | 用途 |
 |--------|--------|------|
@@ -89,15 +102,13 @@ frontend/（Vue3+Vite+TS）──fetch/SSE──→ backend/（FastAPI）
 | `NEO4J_USER` | `neo4j` | Neo4j 用户名 |
 | `NEO4J_PASSWORD` | *（请自行设置）* | Neo4j 密码 |
 | `NEO4J_DBNAME` | `neo4j` | 数据库名 |
-| `LLM_PROVIDER` | `dashscope` | LLM 后端：`dashscope`（云端）或 `ollama`（本地） |
-| `DASHSCOPE_API_KEY` | *（空）* | 阿里百炼 API Key |
-| `DASHSCOPE_MODEL` | `qwen-plus-latest` | 百炼模型 ID |
-| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 百炼兼容接口 |
-| `DASHSCOPE_MODELS` | `qwen3.7-plus,qwen3.7-max,...` | 可选模型列表（逗号分隔） |
+| `LLM_PROVIDER` | `dashscope` | LLM 后端提供商 |
+| `LLM_API_KEY` | *（空）* | 通用 API Key（覆盖提供商特定 key） |
+| `LLM_BASE_URL` | *（自动）* | API 地址（通常由预设表自动填充） |
+| `LLM_MODEL` | *（自动）* | 默认模型名（通常由预设表自动填充） |
+| `LLM_MODELS` | *（自动）* | 可选模型列表（逗号分隔） |
 | `OLLAMA_QWEN_MODEL` | `qwen:32b` | Ollama Qwen 模型标签 |
 | `OLLAMA_LLAMA_MODEL` | `llama2-chinese:13b-chat-q8_0` | Ollama Llama2 模型标签 |
-| `NER_MODEL_NAME` | `model/chinese-roberta-wwm-ext` | BERT 基座路径 |
-| `NER_CHECKPOINT` | `best_roberta_rnn_model_ent_aug` | NER 权重文件名（不含 .pt） |
 | `DATA_DIR` | `data` | 数据目录 |
 | `TMP_DIR` | `tmp_data` | 缓存目录 |
 | `MODEL_DIR` | `model` | 模型权重目录 |
@@ -111,15 +122,32 @@ frontend/（Vue3+Vite+TS）──fetch/SSE──→ backend/（FastAPI）
 
 建议在项目根目录创建 `.env` 文件（已在 `.gitignore`），启动前执行：`export $(cat .env | xargs)`
 
-## NER 模块（`ner/`）
+## 核心模块
 
-- **model.py**：`Bert_Model` — BERT → 双向 RNN（`self.gru` 是历史命名，实为 `nn.RNN`）→ 线性分类器 → BIO 标签
-- **dataset.py**：`Entity_Extend`，3 种数据增强（实体替换/掩码/拼接）；epoch ≥ 7 奇数轮触发
-- **inference.py**：`get_ner_result()` 模型预测 + 规则匹配 + 合并 + TF-IDF 对齐；`get_ner_result_with_fallback()` 主路径为空时触发短语召回 + LLM 扩展
-- **train.py**：训练入口，保存 `model/best_roberta_rnn_model_ent_aug.pt` 和 `tmp_data/tag2idx.npy`
-- **ner_model.py**（根目录）：向后兼容 shim，重新导出 `ner/` 的公共 API
+### 关键词提取（`keyword_extractor.py`）
+- 1 次 LLM 调用同时提取 local_keywords（具体实体名）和 global_keywords（主题概念）
+- 替代原 BERT NER + LLM 意图识别（2 次调用），成本更低
 
-推理依赖文件：`model/chinese-roberta-wwm-ext/`、`model/best_roberta_rnn_model_ent_aug.pt`、`tmp_data/tag2idx.npy`
+### 向量索引（`vector_index.py`）
+- FAISS IndexFlatIP，使用 `shibing624/text2vec-base-chinese`（768 维）生成 embedding
+- 索引文件：`tmp_data/vector_index/entities.faiss` + `entities_meta.npz`
+- 构建脚本：`python build_vector_index.py`（一次性，约几分钟，49278 条实体）
+
+### 双层检索器（`retriever.py`）
+- **Low-level**：local_keywords → FAISS 向量匹配 → Neo4j 查询属性和一跳邻居
+- **High-level**：global_keywords → 对疾病实体补充目标关系（药品/食物/检查等）
+
+### Prompt 组装（`prompt_builder.py`）
+- LightRAG 风格：`<指令>` + `<知识图谱信息>`（实体属性+关系）+ `<用户问题>` + `<注意>`
+
+### LLM 调用层（`webui.py`）
+- `llm_generate()`：非流式生成
+- `llm_chat_stream()`：流式生成（yield chunk）
+- 支持 OpenAI 兼容 API + Ollama 本地调用
+
+### NER 模块（`ner/`，已从运行时移除，保留训练代码）
+- 训练入口：`python -m ner.train`
+- 保存权重：`model/best_roberta_rnn_model_ent_aug.pt`
 
 ## 知识图谱
 
@@ -148,12 +176,10 @@ frontend/（Vue3+Vite+TS）──fetch/SSE──→ backend/（FastAPI）
 |--------|----------|
 | Neo4j 运行中 | 浏览器 http://localhost:7474 能看到控制台 |
 | 知识图谱已导入 | `MATCH (n) RETURN count(n)` 返回 ~44656 |
-| BERT base 模型 | `model/chinese-roberta-wwm-ext/` 下有 config.json + vocab.txt |
-| NER 微调权重 | `model/best_roberta_rnn_model_ent_aug.pt` 存在 |
-| tag2idx 映射 | `tmp_data/tag2idx.npy` 存在 |
+| 向量索引已构建 | `tmp_data/vector_index/entities.faiss` 存在（运行 `python build_vector_index.py`） |
 | PostgreSQL 运行中 | `psql` 能连接，`medicalqa` 数据库已创建 |
 | 数据库迁移已应用 | `alembic upgrade head` 成功 |
-| LLM 可用 | DashScope：`DASHSCOPE_API_KEY` 已设置；Ollama：`ollama list` 有模型 |
+| LLM 可用 | `.env` 中对应提供商的 API Key 已设置；Ollama：`ollama list` 有模型 |
 
 ## Behavioral Guidelines
 
