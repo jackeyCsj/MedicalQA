@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # 索引文件默认存放路径
 _INDEX_DIR = os.path.join("tmp_data", "vector_index")
 _INDEX_FILE = os.path.join(_INDEX_DIR, "entities.faiss")
-_META_FILE = os.path.join(_INDEX_DIR, "entities_meta.npy")
+_META_FILE = os.path.join(_INDEX_DIR, "entities_meta.npz")
 _EMBEDDING_MODEL = "shibing624/text2vec-base-chinese"
 
 
@@ -56,7 +56,7 @@ class VectorIndex:
     def load(cls, index_dir: str = _INDEX_DIR) -> VectorIndex:
         """从磁盘加载预构建的索引。"""
         index_path = os.path.join(index_dir, "entities.faiss")
-        meta_path = os.path.join(index_dir, "entities_meta.npy")
+        meta_path = os.path.join(index_dir, "entities_meta.npz")
         if not os.path.exists(index_path) or not os.path.exists(meta_path):
             raise FileNotFoundError(
                 f"向量索引文件不存在，请先运行 python build_vector_index.py\n"
@@ -178,7 +178,7 @@ def build_index(
     os.makedirs(output_dir, exist_ok=True)
     faiss.write_index(index, os.path.join(output_dir, "entities.faiss"))
     np.savez(
-        os.path.join(output_dir, "entities_meta.npy"),
+        os.path.join(output_dir, "entities_meta.npz"),
         names=np.array(names, dtype=object),
         types=np.array(types, dtype=object),
     )
