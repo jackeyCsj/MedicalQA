@@ -132,13 +132,16 @@ async function sendMessage() {
           <button :class="{ active: authMode === 'register' }" @click="authMode = 'register'">注册</button>
         </div>
         <form @submit.prevent="submitAuth">
+          <!-- 隐藏输入框欺骗浏览器自动填充 -->
+          <input type="text" style="display:none" />
+          <input type="password" style="display:none" />
           <label>
             用户名
             <input v-model="username" autocomplete="off" />
           </label>
           <label>
             密码
-            <input v-model="password" type="password" autocomplete="off" />
+            <input v-model="password" type="password" autocomplete="new-password" />
           </label>
           <button class="primary" :disabled="authBusy">
             {{ authMode === 'login' ? '登录' : '注册' }}
