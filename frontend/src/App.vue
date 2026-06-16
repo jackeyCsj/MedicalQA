@@ -134,11 +134,11 @@ async function sendMessage() {
         <form @submit.prevent="submitAuth">
           <label>
             用户名
-            <input v-model="username" autocomplete="username" />
+            <input v-model="username" autocomplete="off" />
           </label>
           <label>
             密码
-            <input v-model="password" type="password" autocomplete="current-password" />
+            <input v-model="password" type="password" autocomplete="off" />
           </label>
           <button class="primary" :disabled="authBusy">
             {{ authMode === 'login' ? '登录' : '注册' }}
