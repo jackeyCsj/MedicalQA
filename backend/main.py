@@ -14,6 +14,9 @@ from config import settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # 预加载 QA 服务（向量索引 + embedding 模型），避免首次请求等待
+    from backend.routers.chat import service
+    service.load()
     yield
 
 

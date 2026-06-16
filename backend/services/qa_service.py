@@ -29,6 +29,8 @@ class MedicalQAService:
         with self._lock:
             if self._vi is None:
                 self._vi = VectorIndex.load()
+                # 预热 embedding 模型，避免首次请求等待加载
+                self._vi._get_model()
             if self._kg is None:
                 graph = py2neo.Graph(
                     settings.NEO4J_URL,
