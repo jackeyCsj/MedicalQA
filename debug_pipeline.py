@@ -21,6 +21,7 @@ from kg_client import KGClient
 from prompt_builder import build_prompt
 from retriever import Retriever, DISEASE_ATTRIBUTES, DISEASE_RELATIONS
 from vector_index import VectorIndex
+from webui import llm_generate
 
 
 def sep(title: str) -> None:
@@ -110,12 +111,27 @@ def main() -> None:
     prompt = build_prompt(args.query, retrieval)
     print(prompt)
 
+    # ── Step 6: LLM 生成回答 ──
+    sep("Step 6: LLM 生成回答")
+    t0 = time.time()
+    answer = llm_generate(prompt, model=args.model)
+    t1 = time.time()
+    print(f"  耗时: {t1-t0:.2f}s")
+    print(f"  模型: {args.model or settings.LLM_MODEL}")
+    print(f"\n{answer}")
+
     # ── 总结 ──
     sep("数据流总结")
     print(f"  用户问题 → LLM提取关键词({len(keywords.local_keywords)}个local + {len(keywords.global_keywords)}个global)")
     print(f"  → 向量匹配实体 → 图谱扩展邻居 → 组装Prompt({len(prompt)}字符)")
-    print(f"  → 送入LLM生成回答")
+    print(f"  → LLM生成回答({len(answer)}字符, 耗时{t1-t0:.2f}s)")
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
