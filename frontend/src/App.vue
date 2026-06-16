@@ -82,6 +82,9 @@ async function submitLogout() {
   await logout().catch(() => undefined)
   user.value = null
   messages.value = []
+  username.value = ''
+  password.value = ''
+  authError.value = ''
 }
 
 async function sendMessage() {
