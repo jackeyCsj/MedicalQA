@@ -101,7 +101,7 @@ _LLM_PRESETS: dict[str, dict[str, str]] = {
         "models": "qwen3.7-plus,qwen3.7-max,deepseek-v4-flash,deepseek-v4-pro,kimi-k2.6,qwen3.6-flash",
     },
     "mimo": {
-        "base_url": "https://api.xiaomimimo.com/v1/chat/completions",
+        "base_url": "https://api.xiaomimimo.com/v1",
         "model": "mimo-v2.5-pro",
         "models": "mimo-v2.5-pro,mimo-v2.5",
     },
