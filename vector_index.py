@@ -119,7 +119,7 @@ class VectorIndex:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
             logger.info("加载 embedding 模型: %s", _EMBEDDING_MODEL)
-            self._model = SentenceTransformer(_EMBEDDING_MODEL)
+            self._model = SentenceTransformer(_EMBEDDING_MODEL, local_files_only=True)
         return self._model
 
     def _encode_query(self, query: str) -> np.ndarray:
