@@ -51,6 +51,7 @@ class VectorIndex:
         self._index = index
         self._names = names   # shape (N,) dtype str
         self._types = types   # shape (N,) dtype str
+        self._model = None    # SentenceTransformer 懒加载缓存
 
     @classmethod
     def load(cls, index_dir: str = _INDEX_DIR) -> VectorIndex:
@@ -113,19 +114,23 @@ class VectorIndex:
     def total(self) -> int:
         return self._index.ntotal
 
-    @staticmethod
-    def _encode_query(query: str) -> np.ndarray:
+    def _get_model(self):
+        """懒加载 SentenceTransformer 模型（只加载一次）。"""
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            logger.info("加载 embedding 模型: %s", _EMBEDDING_MODEL)
+            self._model = SentenceTransformer(_EMBEDDING_MODEL)
+        return self._model
+
+    def _encode_query(self, query: str) -> np.ndarray:
         """单条查询编码为归一化向量。"""
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer(_EMBEDDING_MODEL)
+        model = self._get_model()
         vec = model.encode([query], normalize_embeddings=True)
         return np.ascontiguousarray(vec, dtype="float32")
 
-    @staticmethod
-    def _encode_batch(texts: List[str]) -> np.ndarray:
+    def _encode_batch(self, texts: List[str]) -> np.ndarray:
         """批量编码为归一化向量。"""
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer(_EMBEDDING_MODEL)
+        model = self._get_model()
         vecs = model.encode(texts, normalize_embeddings=True, batch_size=256, show_progress_bar=True)
         return np.ascontiguousarray(vecs, dtype="float32")
 
