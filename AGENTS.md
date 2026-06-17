@@ -17,8 +17,8 @@ RAGQnASystem — 基于 LightRAG 范式的医疗智能问答系统。
 ```bash
 # --- 新版前后端分离入口 ---
 
-# 后端（FastAPI）
-python -m uvicorn backend.main:app --reload
+# 后端（FastAPI，仅监听 backend/）
+python backend/run_dev.py
 
 # 前端（Vue3 + Vite）
 cd frontend && npm.cmd install && npm.cmd run dev   # Windows PowerShell 用 npm.cmd

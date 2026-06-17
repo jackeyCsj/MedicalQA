@@ -381,8 +381,8 @@ createdb medicalqa
 $env:DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/medicalqa"
 $env:SESSION_SECRET="please-change-this-secret"
 
-# 后端
-python -m uvicorn backend.main:app --reload
+# 后端（只监听 backend/，避免前端和 git 变更反复触发 reload）
+python backend/run_dev.py
 
 # 前端（PowerShell 下优先使用 npm.cmd，避免 npm.ps1 执行策略问题）
 cd frontend

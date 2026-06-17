@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // @ts-expect-error markdown-it uses CommonJS typings in this Vite setup.
 import MarkdownIt from 'markdown-it'
 import { login, logout, me, models, register, streamChat, type StreamEvent, type User } from './api'
@@ -21,6 +21,7 @@ const availableModels = ref<string[]>([])
 const selectedModel = ref<string | null>(null)
 const finalEntityTopK = ref(5)
 const modelMenuOpen = ref(false)
+const modelPickerRef = ref<HTMLElement | null>(null)
 const theme = ref<'light' | 'dark'>('light')
 const input = ref('')
 const statusText = ref('')
@@ -58,6 +59,12 @@ function scrollToBottom() {
   })
 }
 
+function handleDocumentPointerDown(event: PointerEvent) {
+  if (!modelMenuOpen.value) return
+  if (modelPickerRef.value?.contains(event.target as Node)) return
+  modelMenuOpen.value = false
+}
+
 function renderAssistantContent(content: string) {
   return markdown.render(content || '')
 }
@@ -65,12 +72,17 @@ function renderAssistantContent(content: string) {
 watch(statusText, scrollToBottom)
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
   try {
     user.value = await me()
   } catch {
     user.value = null
   }
   await loadModels()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
 })
 
 async function loadModels() {
@@ -293,7 +305,7 @@ function handleInputKeydown(event: KeyboardEvent) {
         </div>
         <form class="composer" @submit.prevent="sendMessage">
           <div class="composer-controls">
-            <div class="model-picker">
+            <div class="model-picker" ref="modelPickerRef">
               <button class="control-button" type="button" @click="modelMenuOpen = !modelMenuOpen">
                 <span>模型</span>
                 <strong>{{ selectedModelLabel }}</strong>
