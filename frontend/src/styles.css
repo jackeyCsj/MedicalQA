@@ -4,12 +4,19 @@
   background: #ffffff;
 }
 
+html,
+body,
+#app {
+  height: 100%;
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  overflow: hidden;
 }
 
 button,
@@ -42,7 +49,8 @@ button:disabled {
   --send-ready: #111111;
   --send-ready-hover: #000000;
   --stepper-surface: #f3f4f6;
-  min-height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   color: var(--text);
   background: var(--bg);
 }
@@ -157,10 +165,11 @@ textarea {
 }
 
 .chat-layout {
-  min-height: 100vh;
+  height: 100%;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   background: var(--bg);
+  overflow: hidden;
 }
 
 .sidebar {
@@ -171,6 +180,7 @@ textarea {
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .brand-block {
@@ -236,10 +246,12 @@ textarea {
 }
 
 .chat-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   background: var(--bg);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -295,10 +307,13 @@ textarea {
 
 .messages {
   overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 28px 24px;
   display: grid;
   align-content: start;
   gap: 22px;
+  overscroll-behavior: contain;
 }
 
 .message {
@@ -326,6 +341,71 @@ textarea {
   background: transparent;
   border-color: transparent;
   padding-left: 0;
+}
+
+.markdown-body {
+  white-space: normal;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body p,
+.markdown-body ol,
+.markdown-body ul,
+.markdown-body blockquote,
+.markdown-body pre {
+  margin: 0 0 0.9em;
+}
+
+.markdown-body ol,
+.markdown-body ul {
+  padding-left: 1.4em;
+}
+
+.markdown-body li + li {
+  margin-top: 0.35em;
+}
+
+.markdown-body strong {
+  font-weight: 700;
+}
+
+.markdown-body code {
+  padding: 0.14em 0.38em;
+  border-radius: 6px;
+  background: var(--surface-soft);
+  font-size: 0.95em;
+}
+
+.markdown-body pre {
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-body blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+}
+
+.markdown-body a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .message.user .bubble {
@@ -368,6 +448,7 @@ textarea {
   display: grid;
   gap: 10px;
   background: var(--bg);
+  flex: 0 0 auto;
 }
 
 .composer-controls {
@@ -575,6 +656,7 @@ textarea {
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    overflow: visible;
   }
 
   .history-panel {

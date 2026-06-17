@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+// @ts-expect-error markdown-it uses CommonJS typings in this Vite setup.
+import MarkdownIt from 'markdown-it'
 import { login, logout, me, models, register, streamChat, type StreamEvent, type User } from './api'
 
 type Message = {
@@ -31,6 +33,11 @@ const finalEntityOptions = Array.from(
   { length: maxFinalEntityTopK - minFinalEntityTopK + 1 },
   (_, index) => minFinalEntityTopK + index
 )
+const markdown = new MarkdownIt({
+  breaks: true,
+  linkify: true,
+  html: false
+})
 
 const isAdmin = computed(() => user.value?.is_admin === true)
 const appThemeClass = computed(() => `theme-${theme.value}`)
@@ -49,6 +56,10 @@ function scrollToBottom() {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight
     }
   })
+}
+
+function renderAssistantContent(content: string) {
+  return markdown.render(content || '')
 }
 
 watch(statusText, scrollToBottom)
@@ -267,7 +278,12 @@ function handleInputKeydown(event: KeyboardEvent) {
 
         <div class="messages" ref="messagesRef">
           <article v-for="(message, index) in messages" :key="index" :class="['message', message.role]">
-            <div class="bubble">{{ message.content || '...' }}</div>
+            <div
+              v-if="message.role === 'assistant'"
+              class="bubble markdown-body"
+              v-html="renderAssistantContent(message.content || '...')"
+            />
+            <div v-else class="bubble">{{ message.content || '...' }}</div>
             <details v-if="isAdmin && message.debug?.length" class="debug">
               <summary>调试信息</summary>
               <pre>{{ JSON.stringify(message.debug, null, 2) }}</pre>
