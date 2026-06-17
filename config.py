@@ -97,8 +97,8 @@ class Settings:
 _LLM_PRESETS: dict[str, dict[str, str]] = {
     "dashscope": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen3.6-flash",
-        "models": "qwen3.7-plus,qwen3.7-max,deepseek-v4-flash,deepseek-v4-pro,kimi-k2.6,qwen3.6-flash",
+        "model": "deepseek-v4-flash",
+        "models": "deepseek-v4-flash,qwen3.6-flash,qwen3.7-plus,qwen3.7-max,deepseek-v4-pro,kimi-k2.6",
     },
     "mimo": {
         "base_url": "https://api.xiaomimimo.com/v1",
@@ -137,7 +137,7 @@ def _build_settings() -> Settings:
         DASHSCOPE_API_KEY=_env("DASHSCOPE_API_KEY", ""),
         DASHSCOPE_MODEL=_env("DASHSCOPE_MODEL", "qwen-plus-latest"),
         DASHSCOPE_BASE_URL=_env("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-        DASHSCOPE_MODELS=_env("DASHSCOPE_MODELS", "qwen3.7-plus,qwen3.7-max,deepseek-v4-flash,deepseek-v4-pro,kimi-k2.6,qwen3.6-flash"),
+        DASHSCOPE_MODELS=_env("DASHSCOPE_MODELS", "deepseek-v4-flash,qwen3.6-flash,qwen3.7-plus,qwen3.7-max,deepseek-v4-pro,kimi-k2.6"),
         OLLAMA_QWEN_MODEL=_env("OLLAMA_QWEN_MODEL", "qwen:32b"),
         OLLAMA_LLAMA_MODEL=_env("OLLAMA_LLAMA_MODEL", "llama2-chinese:13b-chat-q8_0"),
         NER_MODEL_NAME=_env("NER_MODEL_NAME", "model/chinese-roberta-wwm-ext"),
