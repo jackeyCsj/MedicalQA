@@ -26,6 +26,7 @@ class OkResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
     model: str | None = None
+    final_entity_top_k: int = Field(default=5, ge=3, le=10)
 
 
 class ModelsResponse(BaseModel):

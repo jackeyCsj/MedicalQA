@@ -58,6 +58,7 @@ class MedicalQAService:
         self,
         message: str,
         model: str,
+        final_entity_top_k: int = 5,
     ) -> AsyncIterator[tuple[str, str | Dict[str, object]]]:
         self.load()
 
@@ -71,18 +72,27 @@ class MedicalQAService:
 
         yield "status", "正在检索知识图谱..."
         retrieval = await asyncio.to_thread(
-            self.retriever.retrieve, keywords
+            self.retriever.retrieve,
+            keywords,
+            message,
+            final_entity_top_k=final_entity_top_k,
         )
         entities_dict = {
             ent.name: {
                 "type": ent.entity_type,
                 "score": ent.score,
+                "query_score": ent.query_score,
+                "rank_score": ent.rank_score,
                 "attributes": ent.attributes,
                 "neighbors": ent.neighbors,
             }
             for ent in retrieval.entities
         }
-        yield "debug", {"step": "retrieval", "entities": entities_dict}
+        yield "debug", {
+            "step": "retrieval",
+            "final_entity_top_k": final_entity_top_k,
+            "entities": entities_dict,
+        }
 
         prompt = build_prompt(message, retrieval)
         knowledge_parts: List[str] = []
@@ -101,6 +111,7 @@ class MedicalQAService:
                 "local": keywords.local_keywords,
                 "global": keywords.global_keywords,
             },
+            "final_entity_top_k": final_entity_top_k,
             "knowledge": knowledge,
             "prompt": prompt,
         }
@@ -116,6 +127,7 @@ class MedicalQAService:
                 "local": keywords.local_keywords,
                 "global": keywords.global_keywords,
             },
+            "final_entity_top_k": final_entity_top_k,
             "knowledge": knowledge,
         }
 

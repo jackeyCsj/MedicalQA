@@ -113,6 +113,25 @@ textarea {
   color: #dce7ea;
 }
 
+.range-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.range-heading strong {
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar input[type="range"] {
+  padding: 0;
+  border: 0;
+  accent-color: #2dd4bf;
+  background: transparent;
+}
+
 .user-box {
   display: grid;
   gap: 4px;

@@ -28,7 +28,11 @@ def models():
 async def chat_stream(payload: ChatRequest, user=Depends(current_user)):
     async def event_gen():
         try:
-            async for event, data in service.stream_answer(payload.message, payload.model or ""):
+            async for event, data in service.stream_answer(
+                payload.message,
+                payload.model or "",
+                payload.final_entity_top_k,
+            ):
                 yield _sse(event, data)
         except Exception as exc:
             yield _sse("error", {"message": str(exc)})

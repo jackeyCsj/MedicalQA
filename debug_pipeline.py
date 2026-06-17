@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import time
 
 import py2neo
@@ -19,9 +19,15 @@ from config import settings
 from keyword_extractor import extract_keywords
 from kg_client import KGClient
 from prompt_builder import build_prompt
-from retriever import Retriever, DISEASE_ATTRIBUTES, DISEASE_RELATIONS
+from retriever import KEYWORD_SCORE_WEIGHT, QUERY_SCORE_WEIGHT, Retriever
 from vector_index import VectorIndex
 from webui import llm_generate
+
+# 让 retriever 的 debug 日志在 debug_pipeline 中可见
+logging.getLogger("retriever").setLevel(logging.DEBUG)
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("  %(message)s"))
+logging.getLogger("retriever").addHandler(_handler)
 
 
 def sep(title: str) -> None:
@@ -36,7 +42,9 @@ def main() -> None:
     parser.add_argument("--model", default="", help="LLM 模型名，为空时使用配置默认值")
     parser.add_argument("--top-k", type=int, default=10, help="向量检索返回的最大实体数")
     parser.add_argument("--threshold", type=float, default=0.3, help="向量相似度阈值")
+    parser.add_argument("--final-top-k", type=int, default=5, help="完整问题重排后保留的最终实体数（3~10）")
     args = parser.parse_args()
+    final_top_k = max(3, min(10, args.final_top_k))
 
     sep("用户问题")
     print(args.query)
@@ -67,26 +75,60 @@ def main() -> None:
     print(f"  向量索引: {vi.total} 条实体")
 
     # ── Step 3: Low-level 检索（向量匹配） ──
-    sep("Step 3: Low-level 检索 — 向量匹配 local_keywords")
+    sep("Step 3: Low-level 检索 — 向量匹配 local_keywords + 完整问题重排")
     t0 = time.time()
+    raw_hits = []
     for kw in keywords.local_keywords:
         hits = vi.search(kw, top_k=args.top_k, score_threshold=args.threshold)
+        raw_hits.extend(hits)
         print(f"\n  关键词「{kw}」→ 匹配到 {len(hits)} 个实体:")
         for h in hits:
             print(f"    {h.score:.4f}  [{h.entity_type}]  {h.name}")
+
+    raw_hits.sort(key=lambda x: x.score, reverse=True)
+    seen = set()
+    unique_hits = []
+    for hit in raw_hits:
+        if hit.name in seen:
+            continue
+        seen.add(hit.name)
+        unique_hits.append(hit)
+    query_scores = vi.score_texts(args.query, [hit.name for hit in unique_hits])
+    ranked_hits = []
+    for hit, query_score in zip(unique_hits, query_scores):
+        rank_score = KEYWORD_SCORE_WEIGHT * hit.score + QUERY_SCORE_WEIGHT * query_score
+        ranked_hits.append((hit, query_score, rank_score))
+    ranked_hits.sort(key=lambda item: (item[2], item[0].score), reverse=True)
+
+    print(f"\n  完整问题重排（最终保留 top {final_top_k}）:")
+    for index, (hit, query_score, rank_score) in enumerate(ranked_hits, 1):
+        status = "保留" if index <= final_top_k else "候选"
+        print(
+            f"    {status}  rank={rank_score:.4f}  keyword={hit.score:.4f}  query={query_score:.4f}  "
+            f"[{hit.entity_type}]  {hit.name}"
+        )
     t1 = time.time()
-    print(f"\n  向量匹配耗时: {t1-t0:.2f}s")
+    print(f"\n  Step3 候选实体: {len(unique_hits)} → {min(final_top_k, len(unique_hits))}")
+    print(f"  向量匹配与重排耗时: {t1-t0:.2f}s")
 
     # ── Step 4: 图谱扩展 ──
     sep("Step 4: 双层检索（向量匹配 + 图谱一跳邻居扩展）")
     t0 = time.time()
-    retrieval = retriever.retrieve(keywords, top_k=args.top_k, score_threshold=args.threshold)
+    retrieval = retriever.retrieve(
+        keywords,
+        args.query,
+        top_k=args.top_k,
+        score_threshold=args.threshold,
+        final_entity_top_k=final_top_k,
+    )
     t1 = time.time()
     print(f"  检索耗时: {t1-t0:.2f}s")
     print(f"  最终返回 {len(retrieval.entities)} 个实体\n")
 
     for i, ent in enumerate(retrieval.entities, 1):
-        print(f"  [{i}] 【{ent.entity_type}】{ent.name}  (相似度: {ent.score:.4f})")
+        query_score = f", 问题相关度: {ent.query_score:.4f}" if ent.query_score is not None else ""
+        rank_score = f", 综合分: {ent.rank_score:.4f}" if ent.rank_score is not None else ""
+        print(f"  [{i}] 【{ent.entity_type}】{ent.name}  (相似度: {ent.score:.4f}{query_score}{rank_score})")
 
         if ent.attributes:
             print(f"      属性:")
@@ -109,6 +151,7 @@ def main() -> None:
     # ── Step 5: Prompt 组装 ──
     sep("Step 5: 组装最终 Prompt")
     prompt = build_prompt(args.query, retrieval)
+    print(f"  Prompt 长度: {len(prompt)} 字符\n")
     print(prompt)
 
     # ── Step 6: LLM 生成回答 ──
@@ -129,8 +172,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
 
 
 

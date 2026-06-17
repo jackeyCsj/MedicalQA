@@ -17,6 +17,7 @@ const authBusy = ref(false)
 
 const availableModels = ref<string[]>([])
 const selectedModel = ref<string | null>(null)
+const finalEntityTopK = ref(5)
 const input = ref('')
 const statusText = ref('')
 const sending = ref(false)
@@ -98,7 +99,7 @@ async function sendMessage() {
   messages.value.push(assistant)
 
   try {
-    await streamChat(text, selectedModel.value, (event: StreamEvent) => {
+    await streamChat(text, selectedModel.value, finalEntityTopK.value, (event: StreamEvent) => {
       if (event.event === 'status') {
         statusText.value = event.data
       } else if (event.event === 'debug') {
@@ -164,6 +165,13 @@ async function sendMessage() {
             <option v-if="!availableModels.length" :value="null" disabled>加载中...</option>
             <option v-for="model in availableModels" :key="model" :value="model">{{ model }}</option>
           </select>
+        </label>
+        <label class="range-label">
+          <span class="range-heading">
+            <span>保留实体数</span>
+            <strong>{{ finalEntityTopK }}</strong>
+          </span>
+          <input v-model.number="finalEntityTopK" type="range" min="3" max="10" step="1" />
         </label>
         <button @click="submitLogout">退出登录</button>
       </aside>

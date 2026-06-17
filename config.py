@@ -97,7 +97,7 @@ class Settings:
 _LLM_PRESETS: dict[str, dict[str, str]] = {
     "dashscope": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-plus-latest",
+        "model": "qwen3.6-flash",
         "models": "qwen3.7-plus,qwen3.7-max,deepseek-v4-flash,deepseek-v4-pro,kimi-k2.6,qwen3.6-flash",
     },
     "mimo": {
@@ -107,7 +107,7 @@ _LLM_PRESETS: dict[str, dict[str, str]] = {
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-flash",
         "models": "deepseek-v4-flash,deepseek-v4-pro",
     },
 }
@@ -160,3 +160,10 @@ def _build_settings() -> Settings:
 
 # 全局单例：模块导入时即冻结一份当前环境变量快照
 settings: Settings = _build_settings()
+
+
+
+if __name__ == "__main__":
+    # 直接运行 config.py 可打印当前配置（测试环境变量加载）
+    import json
+    print(json.dumps(settings.__dict__, indent=2, ensure_ascii=False))

@@ -73,13 +73,14 @@ function parseSseChunk(buffer: string): { events: StreamEvent[]; rest: string } 
 export async function streamChat(
   message: string,
   model: string | null,
+  finalEntityTopK: number,
   onEvent: (event: StreamEvent) => void
 ) {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, model })
+    body: JSON.stringify({ message, model, final_entity_top_k: finalEntityTopK })
   })
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => ({ detail: '请求失败' }))

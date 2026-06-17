@@ -110,6 +110,16 @@ class VectorIndex:
             batch_results.append(results)
         return batch_results
 
+    def score_texts(self, query: str, texts: Sequence[str]) -> List[float]:
+        """计算 query 与一组短文本的余弦相似度。"""
+        if not texts:
+            return []
+        model = self._get_model()
+        embeddings = model.encode([query, *texts], normalize_embeddings=True)
+        query_vec = np.asarray(embeddings[0], dtype="float32")
+        text_vecs = np.asarray(embeddings[1:], dtype="float32")
+        return [float(score) for score in text_vecs @ query_vec]
+
     @property
     def total(self) -> int:
         return self._index.ntotal
