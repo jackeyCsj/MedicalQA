@@ -19,10 +19,18 @@ Base = declarative_base()
 
 
 def get_db():
-    """FastAPI dependency that yields a SQLAlchemy session."""
+    """FastAPI dependency that yields a SQLAlchemy session.
+
+    请求正常结束时自动 commit，异常时 rollback。
+    对于 SSE 流式端点，finally 在生成器耗尽后执行，事务在整个流式响应期间保持打开。
+    """
     db = SessionLocal()
     try:
         yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

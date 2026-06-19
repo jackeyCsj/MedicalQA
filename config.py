@@ -93,6 +93,14 @@ class Settings:
     COOKIE_SECURE: bool
     CORS_ORIGINS: str
 
+    # --- 多轮诊断 ---
+    #   MAX_CLARIFICATION_TURNS: 最大追问轮次（默认 2，建议 2-3）
+    #     达到此轮次后，decide_action() 强制进入 answer 阶段
+    #   CLARIFICATION_ENABLED: 是否启用多轮诊断
+    #     False 时退回单轮模式（不走路由，不存 DB，向后兼容）
+    MAX_CLARIFICATION_TURNS: int
+    CLARIFICATION_ENABLED: bool
+
 
 _LLM_PRESETS: dict[str, dict[str, str]] = {
     "dashscope": {
@@ -155,6 +163,8 @@ def _build_settings() -> Settings:
         SESSION_EXPIRE_DAYS=_env_int("SESSION_EXPIRE_DAYS", 7),
         COOKIE_SECURE=_env_bool("COOKIE_SECURE", False),
         CORS_ORIGINS=_env("CORS_ORIGINS", "http://localhost:5173"),
+        MAX_CLARIFICATION_TURNS=_env_int("MAX_CLARIFICATION_TURNS", 2),   # 最大追问轮次
+        CLARIFICATION_ENABLED=_env_bool("CLARIFICATION_ENABLED", True),   # 是否启用多轮诊断
     )
 
 

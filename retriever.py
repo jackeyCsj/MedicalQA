@@ -39,7 +39,18 @@ GLOBAL_KEYWORD_RELATION_MAP = DISEASE_RELATION_INTENT_MAP
 
 @dataclass
 class RetrievedEntity:
-    """检索到的单个实体及其关联信息。"""
+    """检索到的单个实体及其关联信息。
+
+    字段说明：
+        name: 实体名称（如"感冒"、"发烧"）
+        entity_type: 实体类型（"疾病"、"疾病症状"、"药品"等）
+        score: 原始向量相似度分数（FAISS 内积，范围 ~[-1, 1]）
+        query_score: 完整用户问题与实体名的语义相似度（用于重排）
+        rank_score: 综合排名分数 = 0.6 * score + 0.4 * query_score（首轮）
+                   后续轮次会重新计算为 0.5 * old_rank + 0.3 * context_score + 0.2 * symptom_bonus
+        attributes: 知识图谱中的实体属性（如疾病简介、病因等）
+        neighbors: 知识图谱中的一跳邻居关系（如关联症状、药品等）
+    """
     name: str
     entity_type: str
     score: float
@@ -51,7 +62,11 @@ class RetrievedEntity:
 
 @dataclass
 class RetrievalResult:
-    """双层检索的完整结果。"""
+    """双层检索的完整结果。
+
+    entities: 按 rank_score 降序排列的实体列表
+    matched_keywords: 本轮匹配的关键词（用于调试和后续轮次对比）
+    """
     entities: List[RetrievedEntity] = field(default_factory=list)
     matched_keywords: Keywords = field(default_factory=Keywords)
 
@@ -126,6 +141,130 @@ class Retriever:
 
         logger.info("检索完成: %d 个实体", len(result.entities))
         return result
+
+    def retrieve_followup(
+        self,
+        new_keywords: Keywords,
+        new_query: str,
+        previous_candidates: List[dict],
+        global_keywords: List[str],
+        top_k: int = 10,
+        final_entity_top_k: int = 5,
+    ) -> tuple[RetrievalResult, bool]:
+        """后续轮次检索：基于证据文本重评分 + 补充新实体。
+
+        与首轮 retrieve() 的核心区别：
+        - 不做全量 FAISS 搜索，而是对上轮候选池做证据文本重评分
+        - 证据文本 = 疾病名 + 属性 + 关系，比单独的实体名更有区分力
+        - 支持症状匹配加分：新提到的症状在疾病已知症状中出现的比例
+        - 只对新增关键词做补充搜索（避免重复检索已有实体）
+
+        重评分公式：new_rank = 0.5 * old_rank + 0.3 * context_score + 0.2 * symptom_bonus
+            - old_rank: 上轮的综合排名分数（保持连续性）
+            - context_score: 证据文本与新查询的语义相似度（核心区分力）
+            - symptom_bonus: 新症状与疾病已知症状的匹配比例
+
+        参数：
+            new_keywords: 本轮新提取的关键词
+            new_query: 用户本轮的原始消息
+            previous_candidates: 上轮的候选实体池（qa_turns.candidate_pool_json）
+            global_keywords: 全局主题关键词（控制图谱扩展方向）
+            top_k: 返回的实体数量上限
+            final_entity_top_k: 送入 prompt 的实体数量
+
+        返回：
+            (RetrievalResult, all_below_threshold)
+            all_below_threshold=True 表示所有候选重评分 < 0.2，可能需要换题检测
+        """
+        effective_global = self._effective_global_keywords(global_keywords)
+
+        # --- 步骤 1：证据文本重评分 ---
+        #   将每个候选实体的完整信息（名称+属性+关系）拼接为证据文本
+        #   用新查询对证据文本做向量相似度计算，得到 context_score
+        re_scored: List[RetrievedEntity] = []
+        if previous_candidates:
+            # 拼接每个候选的证据文本
+            evidence_texts = [_build_evidence_text(c) for c in previous_candidates]
+            # 拼接新查询：本轮关键词 + 用户原始消息
+            combined_query = " ".join(new_keywords.local_keywords) + " " + new_query
+            # 批量计算语义相似度（一次 embedding 调用）
+            context_scores = self.vi.score_texts(combined_query, evidence_texts)
+
+            for candidate, ctx_score in zip(previous_candidates, context_scores):
+                old_scores = candidate.get("scores", {})
+                old_rank = old_scores.get("rank_score", old_scores.get("score", 0))
+
+                # 症状匹配加分：新症状在该疾病已知症状中的命中比例
+                symptom_bonus = _symptom_match_score(
+                    new_keywords.local_keywords,
+                    candidate.get("neighbors", {}).get("疾病的症状", []),
+                )
+
+                # 综合排名分数（三因素加权）
+                new_rank = 0.5 * old_rank + 0.3 * ctx_score + 0.2 * symptom_bonus
+
+                ent = RetrievedEntity(
+                    name=candidate["name"],
+                    entity_type=candidate.get("entity_type", ""),
+                    score=old_scores.get("score", 0),
+                    query_score=ctx_score,
+                    rank_score=new_rank,
+                )
+                re_scored.append(ent)
+
+            re_scored.sort(key=lambda e: e.rank_score or 0, reverse=True)
+            logger.info("[followup] 证据文本重评分完成: %d 个候选, top='%s' (rank=%.3f)",
+                         len(re_scored),
+                         re_scored[0].name if re_scored else "N/A",
+                         re_scored[0].rank_score or 0 if re_scored else 0)
+
+        # --- 步骤 2：补充新实体（仅对新增关键词做搜索）---
+        #   避免重复检索上轮已有的实体
+        existing_names = {c["name"] for c in previous_candidates}
+        old_keywords: set[str] = set()
+        for c in previous_candidates:
+            for kw in c.get("source", {}).get("from_keywords", []):
+                old_keywords.add(kw)
+
+        new_kw_only = [kw for kw in new_keywords.local_keywords if kw not in old_keywords]
+        if new_kw_only:
+            logger.info("[followup] 新增关键词搜索: %s", new_kw_only)
+            for kw in new_kw_only:
+                hits = self.vi.search(kw, top_k=5, score_threshold=0.2)
+                for hit in hits:
+                    if hit.name not in existing_names:
+                        ent = RetrievedEntity(
+                            name=hit.name,
+                            entity_type=hit.entity_type,
+                            score=hit.score,
+                            query_score=hit.score,
+                            rank_score=hit.score,
+                        )
+                        re_scored.append(ent)
+                        existing_names.add(hit.name)
+
+        # --- 步骤 3：检查是否所有候选都低于阈值 ---
+        #   all_below_threshold=True 是换题检测的必要条件之一
+        all_below_threshold = all(
+            (e.rank_score or 0) < 0.2 for e in re_scored
+        ) if re_scored else True
+
+        # --- 步骤 4：取 top_k 并补充图谱信息 ---
+        re_scored.sort(key=lambda e: e.rank_score or 0, reverse=True)
+        top_entities = re_scored[:top_k]
+
+        # 对 top 实体补充 KG 属性和邻居（如果还没有的话）
+        for ent in top_entities:
+            if not ent.attributes and not ent.neighbors:
+                self._enrich_entity(ent, effective_global)
+
+        # --- 步骤 5：构建最终结果 ---
+        result = RetrievalResult(
+            entities=top_entities[:final_entity_top_k],
+            matched_keywords=new_keywords,
+        )
+
+        return result, all_below_threshold
 
     def _low_level_retrieve(
         self,
@@ -305,3 +444,42 @@ class Retriever:
             seen.add(kw)
             result.append(kw)
         return result or list(DEFAULT_GLOBAL_KEYWORDS)
+
+
+def _build_evidence_text(candidate: dict) -> str:
+    """为候选实体拼接证据文本，用于向量重评分。
+
+    证据文本包含候选实体的完整信息：疾病名 + 所有属性 + 所有关系。
+    比单独用实体名做语义匹配区分力更强，因为：
+    - "咳嗽" vs "感冒"：语义距离较远，区分力有限
+    - "咳嗽" vs "疾病名：感冒\n疾病的症状：发烧、咳嗽、头痛\n..."：语义匹配度高得多
+
+    返回格式：
+        疾病名：感冒
+        疾病简介：感冒是由病毒引起的...
+        疾病的症状：发烧、咳嗽、头痛
+        疾病使用药品：感冒灵颗粒、板蓝根颗粒
+    """
+    parts = [f"疾病名：{candidate.get('name', '')}"]
+    for attr, value in candidate.get("attributes", {}).items():
+        parts.append(f"{attr}：{value}")
+    for rel, items in candidate.get("neighbors", {}).items():
+        if items:
+            parts.append(f"{rel}：{'、'.join(items)}")
+    return "\n".join(parts)
+
+
+def _symptom_match_score(new_symptoms: List[str], disease_symptoms: List[str]) -> float:
+    """计算新症状与疾病已知症状的匹配比例。
+
+    用于后续轮次重评分的症状匹配加分项。
+    例如：用户新提到"咳嗽"和"喉咙痛"，疾病已知症状包含"咳嗽"，
+    则匹配比例 = 1/2 = 0.5。
+
+    返回值范围 [0.0, 1.0]，无匹配时返回 0.0。
+    """
+    if not new_symptoms or not disease_symptoms:
+        return 0.0
+    disease_set = set(disease_symptoms)
+    matched = sum(1 for s in new_symptoms if s in disease_set)
+    return matched / len(new_symptoms)
