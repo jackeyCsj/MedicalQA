@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,6 +10,16 @@ from backend.db.database import init_db
 from backend.routers.auth import router as auth_router
 from backend.routers.chat import router as chat_router
 from config import settings
+
+# 配置日志：根据 settings.LOG_LEVEL 控制输出级别
+#   DEBUG: 显示所有检索细节（关键词、评分、图谱扩展等）
+#   INFO:  显示关键流程节点（默认）
+#   WARNING: 只显示警告和错误
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 
 @asynccontextmanager

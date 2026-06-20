@@ -43,7 +43,7 @@ def create_conversation(db: Session, user_id: int, title: str, diagnostic_state:
     conv = Conversation(
         user_id=user_id,
         title=title,
-        phase="collecting",
+        phase=diagnostic_state.get("phase", "collecting"),
         diagnostic_state=diagnostic_state,
     )
     db.add(conv)
@@ -102,12 +102,14 @@ def update_conversation_phase(db: Session, conv: Conversation, phase: str) -> No
 
 
 def update_diagnostic_state(db: Session, conv: Conversation, state_dict: dict) -> None:
-    """更新会话的诊断状态（JSONB 字段）。
+    """更新会话的诊断状态（JSONB 字段）和 phase 列。
 
     每轮对话结束后调用，将最新的 DiagnosticState 序列化后写入 DB。
+    同时同步 conv.phase（SQL 列），保证前端侧边栏能正确显示阶段徽章。
     下一轮对话开始时从 DB 加载恢复状态。
     """
     conv.diagnostic_state = state_dict
+    conv.phase = state_dict.get("phase", conv.phase)
     db.flush()
 
 

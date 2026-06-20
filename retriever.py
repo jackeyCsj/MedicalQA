@@ -107,7 +107,7 @@ class Retriever:
         effective_global_keywords = self._effective_global_keywords(
             keywords.global_keywords
         )
-        logger.debug("[retrieve] effective_global_keywords: %s", effective_global_keywords)
+        logger.info("[retrieve] effective_global_keywords: %s", effective_global_keywords)
 
         # --- Low-level: local keywords → 向量匹配实体 ---
         if keywords.local_keywords:
@@ -254,9 +254,12 @@ class Retriever:
         top_entities = re_scored[:top_k]
 
         # 对 top 实体补充 KG 属性和邻居（如果还没有的话）
+        logger.info("[followup] 图谱补充 effective_global=%s, 待补充实体数=%d", effective_global, len(top_entities))
         for ent in top_entities:
             if not ent.attributes and not ent.neighbors:
                 self._enrich_entity(ent, effective_global)
+                logger.info("[followup] 已补充「%s」(%s): 属性=%d, 关系=%d",
+                            ent.name, ent.entity_type, len(ent.attributes), len(ent.neighbors))
 
         # --- 步骤 5：构建最终结果 ---
         result = RetrievalResult(
@@ -342,8 +345,13 @@ class Retriever:
         return kept
 
     def _enrich_entity(self, ent: RetrievedEntity, global_keywords: List[str]) -> None:
-        """按 global_keywords 为实体补充属性和邻居信息。"""
+        """按 global_keywords 为实体补充属性和邻居信息。
+
+        只查询 global_keywords 指定的关系类型。
+        例如 global_keywords=["疾病简介"] 时，只查疾病简介属性，不查治疗/药品关系。
+        """
         if ent.entity_type == "疾病":
+            logger.debug("[enrich] 「%s」开始补充, global_keywords=%s", ent.name, global_keywords)
             for gkw in global_keywords:
                 attr = DISEASE_ATTRIBUTE_INTENT_MAP.get(gkw)
                 if attr:

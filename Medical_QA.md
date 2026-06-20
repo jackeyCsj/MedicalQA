@@ -788,3 +788,93 @@ Batches: 100%|██████████████████████
 
 
 
+
+# 6.19
+
+
+## PostgreSQL和MySQL区别
+
+❯ 我看着这个数据表qa_turns和diagnostic_state都存了json格式的属性，这是不是PostgreSQL的优势呢，MySQL支持吗
+
+● 是的，这是 PostgreSQL 的一个重要优势。
+
+  PostgreSQL JSONB vs MySQL JSON
+
+  PostgreSQL 的 JSONB 是二进制存储格式，支持：
+  - GIN 索引：可以对 JSON 内部字段建索引，查询速度接近普通列
+  - 丰富的操作符：@>（包含）、?（键存在）、->>（提取字段）等
+  - 可索引查询：WHERE diagnostic_state->>'phase' = 'clarifying' 可以走索引
+
+  MySQL 也有 JSON 类型（5.7+），但：
+  - 存储是文本格式（不是二进制），解析更慢
+  - 支持 JSON_EXTRACT()、->> 操作符，但不能对 JSON 内部字段建高效索引
+  - MySQL 8.0 加了多值索引（Multi-Valued Index），但功能远不如 PostgreSQL 的 GIN 索引
+
+  本项目为什么选 JSONB
+
+  diagnostic_state 和 candidate_pool_json 的特点是：
+  - 结构灵活：symptoms 数组长度不固定，candidate_pool 嵌套层级深
+  - 整体读写：每次诊断轮次都是整体加载/保存，不需要单独查询某个内部字段
+  - PostgreSQL GIN 索引：如果未来需要按 phase 或 turn 筛选会话，JSONB 索引可以加速
+
+  如果用 MySQL，这两个字段也可以用 JSON 类型存储，功能上没问题，只是：
+  - 查询 JSON 内部字段时性能较差
+  - 没有 @> 这种"包含"操作符，需要用 JSON_CONTAINS() 函数替代
+
+  简单说： MySQL 能用 JSON，但 PostgreSQL 的 JSONB 是"一等公民"，索引和查询能力更强。本项目选 PostgreSQL 主要是因为 JSONB + 向量检索（pgvector 扩展）的组合更适合 RAG 场景。
+
+
+
+
+## SQLAlchemy
+
+
+● 项目两个都有，它们是两种创建表的方式，不是二选一的关系：
+
+  ORM 模型（backend/db/models.py）
+
+  Conversation、Message、QATurn 这些类已经存在，就是你说的 ORM 模型。它们继承 Base，通过 __tablename__ 绑定到数据库表：
+
+```python
+class Conversation(Base):
+  __tablename__ = "conversations"   # 对应数据库中的 conversations 表
+  id: Mapped[int] = mapped_column(Integer, primary_key=True)
+  user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+  # ... 字段定义
+```
+
+  两种建表方式
+
+  **方式一：create_all()（database.py:45）**
+
+  def init_db():
+      from backend.db import models  # 导入 ORM 模型，让 Base 知道有哪些表
+      Base.metadata.create_all(bind=engine)  # 根据 ORM 模型自动建表
+
+  这是 SQLAlchemy 原生的方式——根据你定义的 ORM 类自动创建对应的数据库表。适合开发和演示，但有个问题：如果后来你给表加了新字段，create_all() 不会修改已有表（它只创建不存在的表）。
+
+  **方式二：Alembic 迁移（0002_create_conversation_tables.py）**
+
+```python
+def upgrade():
+    op.create_table("conversations",
+	  sa.Column("id", sa.Integer(), primary_key=True),
+	  sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id")),
+	  # ...
+    )
+```
+
+
+  这是手动写的迁移脚本，用 alembic upgrade head 执行。适合生产环境——可以精确控制每次 schema 变更（加字段、改类型、加索引），并且有版本记录，可以回滚。
+
+  两者的关系
+
+  ORM 模型（Python 类）──→ create_all() ──→ 开发时快速建表
+         │
+         └──→ Alembic 迁移 ──→ 生产环境版本化管理
+
+  - ORM 模型是"蓝图"：定义了 Python 代码中怎么操作这些表（Conversation、Message 等类）
+  - Alembic 迁移是"施工记录"：记录了数据库 schema 的每次变更，支持回滚
+  - create_all() 是"一次性建好"：简单粗暴，但不支持增量修改
+
+  本项目两种都用了：init_db() 提供快速建表（create_all），Alembic 提供迁移路径。实际运行时用 alembic upgrade head 就行。

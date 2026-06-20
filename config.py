@@ -1,14 +1,14 @@
 """项目集中配置。
 
-所有外部依赖参数（Neo4j 连接、ollama 模型名、本地模型/数据路径）都通过环境变量
-覆盖，未设置时使用与原代码完全一致的默认值，保证零回归。
+所有配置项通过环境变量读取，默认值统一定义在 .env.example 中。
+使用前请先复制模板：cp .env.example .env
 
 使用方式::
 
     from config import settings
     print(settings.NEO4J_URL)
 
-环境变量列表见下方常量定义；亦可参考 README 的「环境变量」章节。
+环境变量列表见 .env.example；亦可参考 README 的「环境变量」章节。
 """
 
 from __future__ import annotations
@@ -59,19 +59,17 @@ class Settings:
     NEO4J_DBNAME: str
 
     # --- LLM 通用配置（支持 dashscope / mimo / deepseek / ollama） ---
+    #   优先级：LLM_* > 厂商专属环境变量（DASHSCOPE_API_KEY 等）
+    #   所有默认值定义在 .env.example 中
     LLM_PROVIDER: str           # "dashscope" / "mimo" / "deepseek" / "ollama"
     LLM_API_KEY: str            # 当前生效的 API Key
     LLM_BASE_URL: str           # 当前生效的 OpenAI 兼容接口地址
     LLM_MODEL: str              # 当前生效的默认模型
     LLM_MODELS: str             # 可选模型列表，逗号分隔
 
-    # --- 旧版 DashScope 字段（向后保留，不再直接使用） ---
-    DASHSCOPE_API_KEY: str
-    DASHSCOPE_MODEL: str
-    DASHSCOPE_BASE_URL: str
-    DASHSCOPE_MODELS: str
-
     # --- Ollama（LLM_PROVIDER="ollama" 时使用） ---
+    #   Ollama 走 ollama Python 库而非 OpenAI 兼容 API，模型名格式不同（qwen:32b）
+    #   因此单独配置，不走 LLM_MODEL 通用链路
     OLLAMA_QWEN_MODEL: str
     OLLAMA_LLAMA_MODEL: str
 
@@ -102,69 +100,43 @@ class Settings:
     CLARIFICATION_ENABLED: bool
 
 
-_LLM_PRESETS: dict[str, dict[str, str]] = {
-    "dashscope": {
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "deepseek-v4-flash",
-        "models": "deepseek-v4-flash,qwen3.6-flash,qwen3.7-plus,qwen3.7-max,deepseek-v4-pro,kimi-k2.6",
-    },
-    "mimo": {
-        "base_url": "https://api.xiaomimimo.com/v1",
-        "model": "mimo-v2.5-pro",
-        "models": "mimo-v2.5-pro,mimo-v2.5",
-    },
-    "deepseek": {
-        "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-v4-flash",
-        "models": "deepseek-v4-flash,deepseek-v4-pro",
-    },
-}
-
-
 def _build_settings() -> Settings:
-    provider = _env("LLM_PROVIDER", "dashscope")
-    preset = _LLM_PRESETS.get(provider, {})
-    pfx = provider.upper()  # DASHSCOPE / MIMO / DEEPSEEK
+    """从环境变量读取全部配置，所有默认值定义在 .env.example 中。"""
+    provider = _env("LLM_PROVIDER", "")
+    pfx = provider.upper()  # DASHSCOPE / MIMO / DEEPSEEK / OLLAMA
 
-    # 优先级：LLM_* > 厂商专属环境变量（MIMO_API_KEY 等）> 预设默认值
+    # 优先级：LLM_* > 厂商专属环境变量（DASHSCOPE_API_KEY 等）
     llm_api_key = _env("LLM_API_KEY", _env(f"{pfx}_API_KEY", ""))
-    llm_base_url = _env("LLM_BASE_URL", _env(f"{pfx}_BASE_URL", preset.get("base_url", "")))
-    llm_model = _env("LLM_MODEL", _env(f"{pfx}_MODEL", preset.get("model", "")))
-    llm_models = _env("LLM_MODELS", _env(f"{pfx}_MODELS", preset.get("models", "")))
+    llm_base_url = _env("LLM_BASE_URL", _env(f"{pfx}_BASE_URL", ""))
+    llm_model = _env("LLM_MODEL", _env(f"{pfx}_MODEL", ""))
+    llm_models = _env("LLM_MODELS", _env(f"{pfx}_MODELS", ""))
 
     return Settings(
-        NEO4J_URL=_env("NEO4J_URL", "bolt://localhost:7687"),
-        NEO4J_USER=_env("NEO4J_USER", "neo4j"),
-        NEO4J_PASSWORD=_env("NEO4J_PASSWORD", "csj123456"),
-        NEO4J_DBNAME=_env("NEO4J_DBNAME", "neo4j"),
+        NEO4J_URL=_env("NEO4J_URL", ""),
+        NEO4J_USER=_env("NEO4J_USER", ""),
+        NEO4J_PASSWORD=_env("NEO4J_PASSWORD", ""),
+        NEO4J_DBNAME=_env("NEO4J_DBNAME", ""),
         LLM_PROVIDER=provider,
         LLM_API_KEY=llm_api_key,
         LLM_BASE_URL=llm_base_url,
         LLM_MODEL=llm_model,
         LLM_MODELS=llm_models,
-        DASHSCOPE_API_KEY=_env("DASHSCOPE_API_KEY", ""),
-        DASHSCOPE_MODEL=_env("DASHSCOPE_MODEL", "qwen-plus-latest"),
-        DASHSCOPE_BASE_URL=_env("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-        DASHSCOPE_MODELS=_env("DASHSCOPE_MODELS", "deepseek-v4-flash,qwen3.6-flash,qwen3.7-plus,qwen3.7-max,deepseek-v4-pro,kimi-k2.6"),
-        OLLAMA_QWEN_MODEL=_env("OLLAMA_QWEN_MODEL", "qwen:32b"),
-        OLLAMA_LLAMA_MODEL=_env("OLLAMA_LLAMA_MODEL", "llama2-chinese:13b-chat-q8_0"),
-        NER_MODEL_NAME=_env("NER_MODEL_NAME", "model/chinese-roberta-wwm-ext"),
-        NER_CHECKPOINT=_env("NER_CHECKPOINT", "best_roberta_rnn_model_ent_aug"),
-        DATA_DIR=_env("DATA_DIR", "data"),
-        TMP_DIR=_env("TMP_DIR", "tmp_data"),
-        MODEL_DIR=_env("MODEL_DIR", "model"),
-        LOG_LEVEL=_env("LOG_LEVEL", "INFO"),
-        DATABASE_URL=_env(
-            "DATABASE_URL",
-            "postgresql+psycopg://postgres:postgres@localhost:5432/medicalqa",
-        ),
-        SESSION_SECRET=_env("SESSION_SECRET", "dev-insecure-change-me"),
-        SESSION_COOKIE_NAME=_env("SESSION_COOKIE_NAME", "session"),
-        SESSION_EXPIRE_DAYS=_env_int("SESSION_EXPIRE_DAYS", 7),
+        OLLAMA_QWEN_MODEL=_env("OLLAMA_QWEN_MODEL", ""),
+        OLLAMA_LLAMA_MODEL=_env("OLLAMA_LLAMA_MODEL", ""),
+        NER_MODEL_NAME=_env("NER_MODEL_NAME", ""),
+        NER_CHECKPOINT=_env("NER_CHECKPOINT", ""),
+        DATA_DIR=_env("DATA_DIR", ""),
+        TMP_DIR=_env("TMP_DIR", ""),
+        MODEL_DIR=_env("MODEL_DIR", ""),
+        LOG_LEVEL=_env("LOG_LEVEL", ""),
+        DATABASE_URL=_env("DATABASE_URL", ""),
+        SESSION_SECRET=_env("SESSION_SECRET", ""),
+        SESSION_COOKIE_NAME=_env("SESSION_COOKIE_NAME", ""),
+        SESSION_EXPIRE_DAYS=_env_int("SESSION_EXPIRE_DAYS", 0),
         COOKIE_SECURE=_env_bool("COOKIE_SECURE", False),
-        CORS_ORIGINS=_env("CORS_ORIGINS", "http://localhost:5173"),
-        MAX_CLARIFICATION_TURNS=_env_int("MAX_CLARIFICATION_TURNS", 2),   # 最大追问轮次
-        CLARIFICATION_ENABLED=_env_bool("CLARIFICATION_ENABLED", True),   # 是否启用多轮诊断
+        CORS_ORIGINS=_env("CORS_ORIGINS", ""),
+        MAX_CLARIFICATION_TURNS=_env_int("MAX_CLARIFICATION_TURNS", 0),
+        CLARIFICATION_ENABLED=_env_bool("CLARIFICATION_ENABLED", True),
     )
 
 

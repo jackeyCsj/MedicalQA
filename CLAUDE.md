@@ -72,6 +72,9 @@ webui.py  vector_index.py              config.py
           （Neo4j Cypher 查询）
 ```
 
+![[附件/项目架构图.png]]
+
+
 **数据流（多轮诊断）：**
 
 1. `qa_service.py:stream_answer()` 接收用户消息 + 可选 `conversation_id`
@@ -97,44 +100,44 @@ webui.py  vector_index.py              config.py
 
 所有配置通过 `config.py` 的 `Settings` dataclass 管理，支持环境变量覆盖。
 
-**LLM 提供商**：通过 `LLM_PROVIDER` 切换，内置预设表（`_LLM_PRESETS`）自动填充 base_url/model/models：
+**LLM 提供商**：通过 `LLM_PROVIDER` 切换，各厂商的 base_url/model/models 通过专属环境变量配置（推荐写在 `.env` 中，参见 `.env.example`）：
 
 | 提供商 | `LLM_PROVIDER` | API Key 环境变量 | 默认模型 |
 |--------|----------------|------------------|----------|
-| 阿里百炼 | `dashscope` | `DASHSCOPE_API_KEY` | `qwen-plus-latest` |
+| 阿里百炼 | `dashscope` | `DASHSCOPE_API_KEY` | `deepseek-v4-flash` |
 | 小米 MiMo | `mimo` | `MIMO_API_KEY` | `mimo-v2.5-pro` |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
 | Ollama 本地 | `ollama` | 无需 | `qwen:32b` |
 
-**全部配置项：**
+**全部配置项：**（默认值统一在 `.env.example` 中定义，`config.py` 只做纯读取）
 
-| 变量名 | 默认值 | 用途 |
-|--------|--------|------|
-| `NEO4J_URL` | `bolt://localhost:7687` | Neo4j 连接地址 |
-| `NEO4J_USER` | `neo4j` | Neo4j 用户名 |
-| `NEO4J_PASSWORD` | *（请自行设置）* | Neo4j 密码 |
-| `NEO4J_DBNAME` | `neo4j` | 数据库名 |
-| `LLM_PROVIDER` | `dashscope` | LLM 后端提供商 |
-| `LLM_API_KEY` | *（空）* | 通用 API Key（覆盖提供商特定 key） |
-| `LLM_BASE_URL` | *（自动）* | API 地址（通常由预设表自动填充） |
-| `LLM_MODEL` | *（自动）* | 默认模型名（通常由预设表自动填充） |
-| `LLM_MODELS` | *（自动）* | 可选模型列表（逗号分隔） |
-| `OLLAMA_QWEN_MODEL` | `qwen:32b` | Ollama Qwen 模型标签 |
-| `OLLAMA_LLAMA_MODEL` | `llama2-chinese:13b-chat-q8_0` | Ollama Llama2 模型标签 |
-| `DATA_DIR` | `data` | 数据目录 |
-| `TMP_DIR` | `tmp_data` | 缓存目录 |
-| `MODEL_DIR` | `model` | 模型权重目录 |
-| `LOG_LEVEL` | `INFO` | 日志级别 |
-| `DATABASE_URL` | `postgresql+psycopg://...localhost:5432/medicalqa` | PostgreSQL 连接串 |
-| `SESSION_SECRET` | `dev-insecure-change-me` | Session 密钥，部署时必须修改 |
-| `SESSION_COOKIE_NAME` | `session` | Cookie 名称 |
-| `SESSION_EXPIRE_DAYS` | `7` | 登录会话有效期（天） |
-| `COOKIE_SECURE` | `False` | 生产 HTTPS 环境设为 True |
-| `CORS_ORIGINS` | `http://localhost:5173` | 允许跨域的前端源 |
-| `MAX_CLARIFICATION_TURNS` | `2` | 最大追问轮次（建议 2-3） |
-| `CLARIFICATION_ENABLED` | `True` | 是否启用多轮诊断（False 退回单轮模式） |
+| 变量名 | 用途 |
+|--------|------|
+| `NEO4J_URL` | Neo4j 连接地址 |
+| `NEO4J_USER` | Neo4j 用户名 |
+| `NEO4J_PASSWORD` | Neo4j 密码 |
+| `NEO4J_DBNAME` | 数据库名 |
+| `LLM_PROVIDER` | LLM 后端提供商（dashscope / mimo / deepseek / ollama） |
+| `LLM_API_KEY` | 通用 API Key（覆盖提供商特定 key） |
+| `LLM_BASE_URL` | API 地址（通常由 `.env` 中厂商变量填充） |
+| `LLM_MODEL` | 默认模型名（通常由 `.env` 中厂商变量填充） |
+| `LLM_MODELS` | 可选模型列表（逗号分隔，通常由 `.env` 中厂商变量填充） |
+| `OLLAMA_QWEN_MODEL` | Ollama Qwen 模型标签 |
+| `OLLAMA_LLAMA_MODEL` | Ollama Llama2 模型标签 |
+| `DATA_DIR` | 数据目录 |
+| `TMP_DIR` | 缓存目录 |
+| `MODEL_DIR` | 模型权重目录 |
+| `LOG_LEVEL` | 日志级别 |
+| `DATABASE_URL` | PostgreSQL 连接串 |
+| `SESSION_SECRET` | Session 密钥，部署时必须修改 |
+| `SESSION_COOKIE_NAME` | Cookie 名称 |
+| `SESSION_EXPIRE_DAYS` | 登录会话有效期（天） |
+| `COOKIE_SECURE` | 生产 HTTPS 环境设为 True |
+| `CORS_ORIGINS` | 允许跨域的前端源 |
+| `MAX_CLARIFICATION_TURNS` | 最大追问轮次（建议 2-3） |
+| `CLARIFICATION_ENABLED` | 是否启用多轮诊断（False 退回单轮模式） |
 
-建议在项目根目录创建 `.env` 文件（已在 `.gitignore`），启动前执行：`export $(cat .env | xargs)`
+使用前请先复制配置模板：`cp .env.example .env`
 
 ## 核心模块
 

@@ -459,6 +459,16 @@ class MedicalQAService:
             "global_keywords": keywords.global_keywords,
         }
 
+        # 合并初始轮次和本轮的 global_keywords
+        #   初始轮次可能包含"治疗方法"、"治疗药品"等意图，后续轮次的新消息
+        #   可能不再提及这些意图（如用户描述症状时），但初始意图不应丢失
+        prev_global = []
+        if prev_turn and prev_turn.keywords_json:
+            prev_global = prev_turn.keywords_json.get("global", [])
+        merged_global = list(dict.fromkeys(prev_global + keywords.global_keywords))
+        logger.info("[followup] 本轮 global_keywords=%s, 初始轮 global_keywords=%s, 合并后=%s",
+                    keywords.global_keywords, prev_global, merged_global)
+
         # 步骤 5：后续轮次检索（证据文本重评分 + 补充新实体）
         #   retrieve_followup() 返回 (RetrievalResult, all_below_threshold)
         #   all_below_threshold=True 表示所有候选重评分 < 0.2（可能是换题）
@@ -466,7 +476,7 @@ class MedicalQAService:
         retrieval, all_below = await asyncio.to_thread(
             self.retriever.retrieve_followup,
             keywords, message, previous_candidates,
-            keywords.global_keywords,
+            merged_global,  # 合并后的 global_keywords，保留初始轮的治疗意图
             top_k=10,
             final_entity_top_k=final_entity_top_k,
         )

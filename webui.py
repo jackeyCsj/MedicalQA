@@ -55,3 +55,4 @@ def llm_chat_stream(messages: list, model: str = ""):
     for chunk in stream:
         if chunk.choices and chunk.choices[0].delta.content:
             yield chunk.choices[0].delta.content
+

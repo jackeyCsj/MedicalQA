@@ -34,3 +34,5 @@ tests/
 
 # Node (frontend has its own .gitignore too)
 node_modules/
+
+candidate_entity.json
