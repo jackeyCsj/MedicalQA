@@ -556,7 +556,7 @@ class MedicalQAService:
             db, conv.id, user_msg.id,
             mode="followup",  # 标记为后续轮次
             turn_number=state.turn,
-            keywords_json={"local": keywords.local_keywords, "global": keywords.global_keywords},
+            keywords_json={"local": keywords.local_keywords, "global": merged_global},
             candidate_pool_json=candidate_pool,
             prompt_entities_json=_entities_to_prompt_dicts(retrieval.entities),
             memory_state_json=state.to_dict(),
@@ -595,7 +595,7 @@ class MedicalQAService:
         yield "done", {
             "conversation_id": conv.id,
             "entities": entities_dict,
-            "keywords": {"local": keywords.local_keywords, "global": keywords.global_keywords},
+            "keywords": {"local": keywords.local_keywords, "global": merged_global},
             "diagnostic_state": state.to_dict(),
         }
 

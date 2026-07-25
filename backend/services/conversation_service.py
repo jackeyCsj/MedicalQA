@@ -136,13 +136,17 @@ def save_message(db: Session, conversation_id: int, role: str, content: str) -> 
 
 
 def get_conversation_messages(db: Session, conversation_id: int) -> List[Message]:
-    """查询会话的全部消息，按创建时间正序排列。
+    """查询会话的全部消息，按创建时间和自增 ID 正序排列。
 
     用于：1) 前端展示对话历史  2) 构建 prompt 中的对话历史上下文
+
+    注意：PostgreSQL 的 now()/CURRENT_TIMESTAMP 在同一事务内可能相同。
+    一轮问答里的用户消息和助手消息可能拥有相同 created_at，因此需要
+    Message.id 作为稳定的第二排序键，保证重新加载历史会话时顺序不乱。
     """
     return db.query(Message).filter(
         Message.conversation_id == conversation_id,
-    ).order_by(Message.created_at).all()
+    ).order_by(Message.created_at, Message.id).all()
 
 
 # ============================================================

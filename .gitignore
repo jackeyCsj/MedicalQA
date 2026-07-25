@@ -36,3 +36,4 @@ tests/
 node_modules/
 
 candidate_entity.json
+Notes.md

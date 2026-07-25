@@ -70,7 +70,10 @@ class Conversation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     user: Mapped[User] = relationship(back_populates="conversations")
-    messages: Mapped[list["Message"]] = relationship(back_populates="conversation", order_by="Message.created_at")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation",
+        order_by=lambda: (Message.created_at, Message.id),
+    )
     qa_turns: Mapped[list["QATurn"]] = relationship(back_populates="conversation", order_by="QATurn.created_at")
 
 

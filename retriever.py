@@ -209,6 +209,8 @@ class Retriever:
                     score=old_scores.get("score", 0),
                     query_score=ctx_score,
                     rank_score=new_rank,
+                    attributes=dict(candidate.get("attributes") or {}),
+                    neighbors=dict(candidate.get("neighbors") or {}),
                 )
                 re_scored.append(ent)
 
@@ -253,13 +255,12 @@ class Retriever:
         re_scored.sort(key=lambda e: e.rank_score or 0, reverse=True)
         top_entities = re_scored[:top_k]
 
-        # 对 top 实体补充 KG 属性和邻居（如果还没有的话）
+        # 对 top 实体补充 KG 属性和邻居：即使已有部分关系，也继续按当前意图补齐缺失关系
         logger.info("[followup] 图谱补充 effective_global=%s, 待补充实体数=%d", effective_global, len(top_entities))
         for ent in top_entities:
-            if not ent.attributes and not ent.neighbors:
-                self._enrich_entity(ent, effective_global)
-                logger.info("[followup] 已补充「%s」(%s): 属性=%d, 关系=%d",
-                            ent.name, ent.entity_type, len(ent.attributes), len(ent.neighbors))
+            self._enrich_entity(ent, effective_global)
+            logger.info("[followup] 已补充「%s」(%s): 属性=%d, 关系=%d",
+                        ent.name, ent.entity_type, len(ent.attributes), len(ent.neighbors))
 
         # --- 步骤 5：构建最终结果 ---
         result = RetrievalResult(
